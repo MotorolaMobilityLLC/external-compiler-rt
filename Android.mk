@@ -94,4 +94,4 @@ include $(BUILD_STATIC_LIBRARY)
 endif # ifneq($(TARGET_ARCH),mips)
 
 
-#include $(LOCAL_PATH)/lib/asan/Android.mk
+include $(LOCAL_PATH)/lib/asan/Android.mk
