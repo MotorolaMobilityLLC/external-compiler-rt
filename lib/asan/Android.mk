@@ -23,14 +23,12 @@ ASAN_NEEDS_SEGV=0
 ASAN_HAS_EXCEPTIONS=1
 ASAN_FLEXIBLE_MAPPING_AND_OFFSET=0
 
-
 asan_rtl_files := \
 	asan_rtl.cc \
 	asan_allocator.cc	\
 	asan_globals.cc	\
 	asan_interceptors.cc	\
 	asan_linux.cc \
-	asan_mac.cc \
 	asan_malloc_linux.cc \
 	asan_malloc_mac.cc \
 	asan_poisoning.cc	\
@@ -50,7 +48,9 @@ asan_rtl_cflags := \
 	-DASAN_HAS_EXCEPTIONS=$(ASAN_HAS_EXCEPTIONS) \
 	-DASAN_FLEXIBLE_MAPPING_AND_OFFSET=$(ASAN_FLEXIBLE_MAPPING_AND_OFFSET) \
 	-Wno-covered-switch-default \
-	-Wno-sign-compare
+	-Wno-sign-compare \
+	-Wno-unused-parameter \
+	-D__WORDSIZE=32
 
 asan_test_files := \
 	tests/asan_test.cc \
@@ -59,51 +59,36 @@ asan_test_files := \
 	tests/asan_interface_test.cc
 
 asan_test_cflags := \
-	-DADDRESS_SANITIZER=1 \
-	-faddress-sanitizer \
-	-mllvm -asan-blacklist=external/asan/tests/asan_test.ignore \
-	-mllvm -asan-stack=1 \
-	-mllvm -asan-globals=1 \
-	-mllvm -asan-mapping-scale=0 \
-	-mllvm -asan-mapping-offset-log=-1 \
-	-mllvm -asan-use-after-return=0 \
+	-mllvm -asan-blacklist=external/compiler-rt/lib/asan/tests/asan_test.ignore \
 	-DASAN_LOW_MEMORY=1 \
 	-DASAN_UAR=0 \
 	-DASAN_NEEDS_SEGV=$(ASAN_NEEDS_SEGV) \
 	-DASAN_HAS_EXCEPTIONS=$(ASAN_HAS_EXCEPTIONS) \
 	-DASAN_HAS_BLACKLIST=1 \
-	-Wno-covered-switch-default
+	-Wno-covered-switch-default \
+	-Wno-sign-compare \
+	-Wno-unused-parameter \
+	-D__WORDSIZE=32
 
 
 include $(CLEAR_VARS)
 
-LOCAL_C_INCLUDES := \
-	        bionic
-
 LOCAL_MODULE := libasan
 LOCAL_MODULE_TAGS := optional
-LOCAL_CFLAGS += \
-	$(asan_rtl_cflags) \
-	-Wno-unused-parameter \
-	-D__WORDSIZE=32
+LOCAL_C_INCLUDES := bionic
+LOCAL_CFLAGS += $(asan_rtl_cflags)
 LOCAL_SRC_FILES := asan_android_stub.cc
 LOCAL_CPP_EXTENSION := .cc
 LOCAL_CLANG := true
 include $(BUILD_STATIC_LIBRARY)
 
 
-
 include $(CLEAR_VARS)
 
-LOCAL_C_INCLUDES := \
-	        bionic
-
 LOCAL_MODULE := libasan_preload
-LOCAL_MODULE_TAGS := optional
-LOCAL_CFLAGS += \
-	$(asan_rtl_cflags) \
-	-Wno-unused-parameter \
-	-D__WORDSIZE=32
+LOCAL_MODULE_TAGS := eng
+LOCAL_C_INCLUDES := bionic
+LOCAL_CFLAGS += $(asan_rtl_cflags)
 LOCAL_SRC_FILES := $(asan_rtl_files)
 LOCAL_CPP_EXTENSION := .cc
 LOCAL_SHARED_LIBRARIES := libc libstlport libdl
@@ -114,12 +99,10 @@ include $(BUILD_SHARED_LIBRARY)
 include $(CLEAR_VARS)
 
 LOCAL_MODULE := asanwrapper
-LOCAL_MODULE_TAGS := optional
-
+LOCAL_MODULE_TAGS := eng
 LOCAL_C_INCLUDES := \
         bionic \
         external/stlport/stlport
-
 LOCAL_SRC_FILES := asanwrapper.cc
 LOCAL_CPP_EXTENSION := .cc
 LOCAL_SHARED_LIBRARIES := libstlport libc
@@ -129,26 +112,85 @@ include $(BUILD_EXECUTABLE)
 
 include $(CLEAR_VARS)
 
-LOCAL_SRC_FILES:= \
-	../../../../frameworks/base/cmds/app_process/app_main.cpp
-
-LOCAL_SHARED_LIBRARIES := \
-	libcutils \
-	libutils \
-	libbinder \
-	libandroid_runtime
-
-LOCAL_MODULE:= asan/app_process
-LOCAL_MODULE_TAGS := optional
-
+LOCAL_MODULE := libasan_noinst_test
+LOCAL_MODULE_TAGS := tests
+LOCAL_C_INCLUDES := \
+        bionic \
+        external/stlport/stlport \
+        external/gtest/include
 LOCAL_CFLAGS += \
-       -faddress-sanitizer
-LOCAL_LDFLAGS += -Wl,-u,__asan_preinit
+        -Wno-unused-parameter \
+        -Wno-sign-compare \
+        -D__WORDSIZE=32
+LOCAL_SRC_FILES := tests/asan_noinst_test.cc
+LOCAL_CPP_EXTENSION := .cc
+LOCAL_CLANG := true
+include $(BUILD_STATIC_LIBRARY)
 
-LOCAL_STATIC_LIBRARIES += libasan
-LOCAL_SHARED_LIBRARIES += libdl libasan_preload
-LOCAL_CLANG:=true
+
+include $(CLEAR_VARS)
+
+LOCAL_MODULE := asan_test
+LOCAL_MODULE_TAGS := tests
+LOCAL_C_INCLUDES := \
+        bionic \
+        external/stlport/stlport \
+        external/gtest/include
+LOCAL_CFLAGS += $(asan_test_cflags)
+LOCAL_SRC_FILES := $(asan_test_files)
+LOCAL_CPP_EXTENSION := .cc
+LOCAL_STATIC_LIBRARIES := libgtest libasan_noinst_test
+LOCAL_SHARED_LIBRARIES := libc libstlport
+LOCAL_ADDRESS_SANITIZER := true
 
 include $(BUILD_EXECUTABLE)
+
+# Build output tests for AddressSanitizer.
+
+define asan-output-test
+    include $(CLEAR_VARS)
+    LOCAL_MODULE := $(1)
+    LOCAL_MODULE_PATH := $(TARGET_OUT_EXECUTABLES)/asan
+    LOCAL_MODULE_TAGS := tests
+    LOCAL_SRC_FILES := output_tests/$(1).cc
+    LOCAL_CPP_EXTENSION := .cc
+    LOCAL_ADDRESS_SANITIZER := true
+    LOCAL_C_INCLUDES := bionic external/stlport/stlport
+    LOCAL_CFLAGS := -Wno-unused-parameter
+    LOCAL_SHARED_LIBRARIES := libstlport
+    include $(BUILD_EXECUTABLE)
+endef
+
+define asan-output-test-so
+    include $(CLEAR_VARS)
+    LOCAL_MODULE := $(1)
+    LOCAL_MODULE_TAGS := tests
+    LOCAL_MODULE_PATH := $(TARGET_OUT_EXECUTABLES)/asan
+    LOCAL_SRC_FILES := output_tests/$(1).cc
+    LOCAL_CPP_EXTENSION := .cc
+    LOCAL_ADDRESS_SANITIZER := true
+    LOCAL_C_INCLUDES := bionic external/stlport/stlport
+    LOCAL_CFLAGS := -Wno-unused-parameter
+    LOCAL_SHARED_LIBRARIES := libstlport
+    include $(BUILD_SHARED_LIBRARY)
+endef
+
+OUTPUT_TESTS := \
+  clone_test \
+  deep_tail_call \
+  dlclose-test \
+  dlclose-test-so \
+  global-overflow \
+  heap-overflow \
+  large_func_test \
+  null_deref \
+  shared-lib-test \
+  shared-lib-test-so \
+  stack-overflow \
+  strncpy-overflow \
+  use-after-free
+
+$(foreach test,$(filter %-so,$(OUTPUT_TESTS)),$(eval $(call asan-output-test-so,$(test))))
+$(foreach test,$(filter-out %-so,$(OUTPUT_TESTS)),$(eval $(call asan-output-test,$(test))))
 
 endif # ifeq($(TARGET_ARCH),arm)
