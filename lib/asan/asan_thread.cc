@@ -73,7 +73,7 @@ void AsanThread::Init() {
   ClearShadowForThreadStack();
   if (FLAG_v >= 1) {
     int local = 0;
-    Report("T%d: stack [%p,%p) size 0x%lx; local=%p\n",
+    Report("T%d: stack [%p,%p) size 0x%zx; local=%p\n",
            tid(), stack_bottom_, stack_top_,
            stack_top_ - stack_bottom_, &local);
   }
@@ -82,6 +82,7 @@ void AsanThread::Init() {
 
 thread_return_t AsanThread::ThreadStart() {
   Init();
+  if (FLAG_use_sigaltstack) SetAlternateSignalStack();
 
   if (!start_routine_) {
     // start_routine_ == NULL if we're on the main thread or on one of the
@@ -93,6 +94,7 @@ thread_return_t AsanThread::ThreadStart() {
 
   thread_return_t res = start_routine_(arg_);
   malloc_storage().CommitBack();
+  if (FLAG_use_sigaltstack) UnsetAlternateSignalStack();
 
   this->Destroy();
 

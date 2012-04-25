@@ -14,8 +14,7 @@
 
 #ifdef __APPLE__
 
-#include "asan_mac.h"
-
+#include "asan_interceptors.h"
 #include "asan_internal.h"
 #include "asan_mapping.h"
 #include "asan_procmaps.h"
@@ -34,6 +33,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <libkern/OSAtomic.h>
+#include <CoreFoundation/CFString.h>
 
 namespace __asan {
 
@@ -50,7 +50,14 @@ void GetPcSpBp(void *context, uintptr_t *pc, uintptr_t *sp, uintptr_t *bp) {
 # endif  // __WORDSIZE
 }
 
-int GetMacosVersion() {
+enum {
+  MACOS_VERSION_UNKNOWN = 0,
+  MACOS_VERSION_LEOPARD,
+  MACOS_VERSION_SNOW_LEOPARD,
+  MACOS_VERSION_LION,
+};
+
+static int GetMacosVersion() {
   int mib[2] = { CTL_KERN, KERN_OSRELEASE };
   char version[100];
   size_t len = 0, maxlen = sizeof(version) / sizeof(version[0]);
@@ -70,6 +77,15 @@ int GetMacosVersion() {
     }
     default: return MACOS_VERSION_UNKNOWN;
   }
+}
+
+bool PlatformHasDifferentMemcpyAndMemmove() {
+  // On OS X 10.7 memcpy() and memmove() are both resolved
+  // into memmove$VARIANT$sse42.
+  // See also http://code.google.com/p/address-sanitizer/issues/detail?id=34.
+  // TODO(glider): need to check dynamically that memcpy() and memmove() are
+  // actually the same function.
+  return GetMacosVersion() == MACOS_VERSION_SNOW_LEOPARD;
 }
 
 // No-op. Mac does not support static linkage anyway.
@@ -93,7 +109,7 @@ bool AsanShadowRangeIsAvailable() {
   uintptr_t start, end;
   bool available = true;
   while (procmaps.Next(&start, &end,
-                       /*offset*/NULL, /*filename*/NULL, /*size*/NULL)) {
+                       /*offset*/NULL, /*filename*/NULL, /*filename_size*/0)) {
     if (!IntervalsAreSeparate(start, end,
                               kLowShadowBeg - kMmapGranularity,
                               kHighShadowEnd)) {
@@ -369,9 +385,18 @@ mach_error_t __interception_allocate_island(void **ptr,
     if (island_allocator_pos != (void*)kIslandBeg) {
       return KERN_NO_SPACE;
     }
+    if (FLAG_v) {
+      Report("Mapped pages %p--%p for branch islands.\n",
+             kIslandBeg, kIslandEnd);
+    }
+    // Should not be very performance-critical.
+    internal_memset(island_allocator_pos, 0xCC, kIslandEnd - kIslandBeg);
   };
   *ptr = island_allocator_pos;
   island_allocator_pos = (char*)island_allocator_pos + kPageSize;
+  if (FLAG_v) {
+    Report("Branch island allocated at %p\n", *ptr);
+  }
   return err_none;
 }
 
@@ -410,6 +435,43 @@ mach_error_t __interception_deallocate_island(void *ptr) {
 //   http://developer.apple.com/library/mac/#documentation/Performance/Reference/GCD_libdispatch_Ref/Reference/reference.html
 // The implementation details are at
 //   http://libdispatch.macosforge.org/trac/browser/trunk/src/queue.c
+
+typedef void* pthread_workqueue_t;
+typedef void* pthread_workitem_handle_t;
+
+typedef void* dispatch_group_t;
+typedef void* dispatch_queue_t;
+typedef uint64_t dispatch_time_t;
+typedef void (*dispatch_function_t)(void *block);
+typedef void* (*worker_t)(void *block);
+
+// A wrapper for the ObjC blocks used to support libdispatch.
+typedef struct {
+  void *block;
+  dispatch_function_t func;
+  int parent_tid;
+} asan_block_context_t;
+
+// We use extern declarations of libdispatch functions here instead
+// of including <dispatch/dispatch.h>. This header is not present on
+// Mac OS X Leopard and eariler, and although we don't expect ASan to
+// work on legacy systems, it's bad to break the build of
+// LLVM compiler-rt there.
+extern "C" {
+void dispatch_async_f(dispatch_queue_t dq, void *ctxt,
+                      dispatch_function_t func);
+void dispatch_sync_f(dispatch_queue_t dq, void *ctxt,
+                     dispatch_function_t func);
+void dispatch_after_f(dispatch_time_t when, dispatch_queue_t dq, void *ctxt,
+                      dispatch_function_t func);
+void dispatch_barrier_async_f(dispatch_queue_t dq, void *ctxt,
+                              dispatch_function_t func);
+void dispatch_group_async_f(dispatch_group_t group, dispatch_queue_t dq,
+                            void *ctxt, dispatch_function_t func);
+int pthread_workqueue_additem_np(pthread_workqueue_t workq,
+    void *(*workitem_func)(void *), void * workitem_arg,
+    pthread_workitem_handle_t * itemhandlep, unsigned int *gencountp);
+}  // extern "C"
 
 extern "C"
 void asan_dispatch_call_block_and_release(void *block) {
@@ -593,5 +655,31 @@ INTERCEPTOR(CFStringRef, CFStringCreateCopy, CFAllocatorRef alloc,
     return REAL(CFStringCreateCopy)(alloc, str);
   }
 }
+
+namespace __asan {
+
+void InitializeMacInterceptors() {
+  CHECK(INTERCEPT_FUNCTION(dispatch_async_f));
+  CHECK(INTERCEPT_FUNCTION(dispatch_sync_f));
+  CHECK(INTERCEPT_FUNCTION(dispatch_after_f));
+  CHECK(INTERCEPT_FUNCTION(dispatch_barrier_async_f));
+  CHECK(INTERCEPT_FUNCTION(dispatch_group_async_f));
+  // We don't need to intercept pthread_workqueue_additem_np() to support the
+  // libdispatch API, but it helps us to debug the unsupported functions. Let's
+  // intercept it only during verbose runs.
+  if (FLAG_v >= 2) {
+    CHECK(INTERCEPT_FUNCTION(pthread_workqueue_additem_np));
+  }
+  // Normally CFStringCreateCopy should not copy constant CF strings.
+  // Replacing the default CFAllocator causes constant strings to be copied
+  // rather than just returned, which leads to bugs in big applications like
+  // Chromium and WebKit, see
+  // http://code.google.com/p/address-sanitizer/issues/detail?id=10
+  // Until this problem is fixed we need to check that the string is
+  // non-constant before calling CFStringCreateCopy.
+  CHECK(INTERCEPT_FUNCTION(CFStringCreateCopy));
+}
+
+}  // namespace __asan
 
 #endif  // __APPLE__

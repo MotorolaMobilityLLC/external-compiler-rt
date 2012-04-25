@@ -38,6 +38,7 @@ extern "C" void* _ReturnAddress(void);
 # define ALIAS(x)   // TODO(timurrrr): do we need this on Windows?
 # define ALIGNED(x) __declspec(align(x))
 # define NOINLINE __declspec(noinline)
+# define NORETURN __declspec(noreturn)
 
 # define ASAN_INTERFACE_ATTRIBUTE  // TODO(timurrrr): do we need this on Win?
 #else  // defined(_WIN32)
@@ -46,6 +47,7 @@ extern "C" void* _ReturnAddress(void);
 # define ALIAS(x) __attribute__((alias(x)))
 # define ALIGNED(x) __attribute__((aligned(x)))
 # define NOINLINE __attribute__((noinline))
+# define NORETURN  __attribute__((noreturn))
 
 # define ASAN_INTERFACE_ATTRIBUTE __attribute__((visibility("default")))
 #endif  // defined(_WIN32)
@@ -102,11 +104,13 @@ extern "C" void* _ReturnAddress(void);
 # define ASAN_WINDOWS 0
 #endif
 
+#define ASAN_POSIX (ASAN_LINUX || ASAN_MAC)
+
 #if !defined(__has_feature)
 #define __has_feature(x) 0
 #endif
 
-#if defined(__has_feature) && __has_feature(address_sanitizer)
+#if __has_feature(address_sanitizer)
 # error "The AddressSanitizer run-time should not be"
         " instrumented by AddressSanitizer"
 #endif
@@ -145,12 +149,13 @@ class AsanThread;
 struct AsanStackTrace;
 
 // asan_rtl.cc
-void CheckFailed(const char *cond, const char *file, int line);
-void ShowStatsAndAbort();
+void NORETURN CheckFailed(const char *cond, const char *file, int line);
+void NORETURN ShowStatsAndAbort();
 
 // asan_globals.cc
 bool DescribeAddrIfGlobal(uintptr_t addr);
 
+void ReplaceOperatorsNewAndDelete();
 // asan_malloc_linux.cc / asan_malloc_mac.cc
 void ReplaceSystemMalloc();
 
@@ -177,10 +182,13 @@ size_t AsanWrite(int fd, const void *buf, size_t count);
 int AsanClose(int fd);
 
 bool AsanInterceptsSignal(int signum);
+void SetAlternateSignalStack();
+void UnsetAlternateSignalStack();
 void InstallSignalHandlers();
 int GetPid();
 uintptr_t GetThreadSelf();
 int AtomicInc(int *a);
+uint16_t AtomicExchange(uint16_t *a, uint16_t new_val);
 
 // Wrapper for TLS/TSD.
 void AsanTSDInit(void (*destructor)(void *tsd));
@@ -205,6 +213,8 @@ void Report(const char *format, ...);
 template<class T> T Min(T a, T b) { return a < b ? a : b; }
 template<class T> T Max(T a, T b) { return a > b ? a : b; }
 
+void SortArray(uintptr_t *array, size_t size);
+
 // asan_poisoning.cc
 // Poisons the shadow memory for "size" bytes starting from "addr".
 void PoisonShadow(uintptr_t addr, size_t size, uint8_t value);
@@ -214,6 +224,15 @@ void PoisonShadowPartialRightRedzone(uintptr_t addr,
                                      uintptr_t size,
                                      uintptr_t redzone_size,
                                      uint8_t value);
+
+// Platfrom-specific options.
+#ifdef __APPLE__
+bool PlatformHasDifferentMemcpyAndMemmove();
+# define PLATFORM_HAS_DIFFERENT_MEMCPY_AND_MEMMOVE \
+    (PlatformHasDifferentMemcpyAndMemmove())
+#else
+# define PLATFORM_HAS_DIFFERENT_MEMCPY_AND_MEMMOVE true
+#endif  // __APPLE__
 
 extern size_t FLAG_quarantine_size;
 extern int    FLAG_demangle;
@@ -234,6 +253,7 @@ extern int    FLAG_exitcode;
 extern bool   FLAG_allow_user_poisoning;
 extern int    FLAG_sleep_before_dying;
 extern bool   FLAG_handle_segv;
+extern bool   FLAG_use_sigaltstack;
 
 extern int asan_inited;
 // Used to avoid infinite recursion in __asan_init().
@@ -241,9 +261,10 @@ extern bool asan_init_is_running;
 
 enum LinkerInitialized { LINKER_INITIALIZED = 0 };
 
-void AsanDie();
+void NORETURN AsanDie();
 void SleepForSeconds(int seconds);
-void Exit(int exitcode);
+void NORETURN Exit(int exitcode);
+void NORETURN Abort();
 int Atexit(void (*function)(void));
 
 #define CHECK(cond) do { if (!(cond)) { \
@@ -291,12 +312,6 @@ bool WinSymbolize(const void *addr, char *out_buffer, int buffer_size);
 #endif
 
 typedef thread_return_t (THREAD_CALLING_CONV *thread_callback_t)(void* arg);
-
-#define GET_BP_PC_SP \
-  uintptr_t bp = GET_CURRENT_FRAME();              \
-  uintptr_t pc = GET_CALLER_PC();                  \
-  uintptr_t local_stack;                           \
-  uintptr_t sp = (uintptr_t)&local_stack;
 
 // These magic values are written to shadow for better error reporting.
 const int kAsanHeapLeftRedzoneMagic = 0xfa;
