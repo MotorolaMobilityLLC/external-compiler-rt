@@ -219,15 +219,15 @@ struct AsanChunk: public ChunkBase {
     size_t offset;
     Printf("%p is located ", addr);
     if (AddrIsInside(addr, access_size, &offset)) {
-      Printf("%ld bytes inside of", offset);
+      Printf("%zu bytes inside of", offset);
     } else if (AddrIsAtLeft(addr, access_size, &offset)) {
-      Printf("%ld bytes to the left of", offset);
+      Printf("%zu bytes to the left of", offset);
     } else if (AddrIsAtRight(addr, access_size, &offset)) {
-      Printf("%ld bytes to the right of", offset);
+      Printf("%zu bytes to the right of", offset);
     } else {
       Printf(" somewhere around (this is AddressSanitizer bug!)");
     }
-    Printf(" %lu-byte region [%p,%p)\n",
+    Printf(" %zu-byte region [%p,%p)\n",
            used_size, beg(), beg() + used_size);
   }
 };
@@ -362,9 +362,6 @@ class MallocInfo {
     return FindChunkByAddr(addr);
   }
 
-  // TODO(glider): AllocationSize() may become very slow if the size of
-  // page_groups_ grows. This can be fixed by increasing kMinMmapSize,
-  // but a better solution is to speed up the search somehow.
   size_t AllocationSize(uintptr_t ptr) {
     if (!ptr) return 0;
     ScopedLock lock(&mu_);
@@ -392,7 +389,7 @@ class MallocInfo {
     ScopedLock lock(&mu_);
     size_t malloced = 0;
 
-    Printf(" MallocInfo: in quarantine: %ld malloced: %ld; ",
+    Printf(" MallocInfo: in quarantine: %zu malloced: %zu; ",
            quarantine_.size() >> 20, malloced >> 20);
     for (size_t j = 1; j < kNumberOfSizeClasses; j++) {
       AsanChunk *i = free_lists_[j];
@@ -401,7 +398,7 @@ class MallocInfo {
       for (; i; i = i->next) {
         t += i->Size();
       }
-      Printf("%ld:%ld ", j, t >> 20);
+      Printf("%zu:%zu ", j, t >> 20);
     }
     Printf("\n");
   }
@@ -413,12 +410,32 @@ class MallocInfo {
 
  private:
   PageGroup *FindPageGroupUnlocked(uintptr_t addr) {
-    for (int i = 0; i < n_page_groups_; i++) {
-      PageGroup *g = page_groups_[i];
-      if (g->InRange(addr)) {
-        return g;
+    int n = n_page_groups_;
+    // If the page groups are not sorted yet, sort them.
+    if (n_sorted_page_groups_ < n) {
+      SortArray((uintptr_t*)page_groups_, n);
+      n_sorted_page_groups_ = n;
+    }
+    // Binary search over the page groups.
+    int beg = 0, end = n;
+    while (beg < end) {
+      int med = (beg + end) / 2;
+      uintptr_t g = (uintptr_t)page_groups_[med];
+      if (addr > g) {
+        // 'g' points to the end of the group, so 'addr'
+        // may not belong to page_groups_[med] or any previous group.
+        beg = med + 1;
+      } else {
+        // 'addr' may belong to page_groups_[med] or a previous group.
+        end = med;
       }
     }
+    if (beg >= n)
+      return NULL;
+    PageGroup *g = page_groups_[beg];
+    CHECK(g);
+    if (g->InRange(addr))
+      return g;
     return NULL;
   }
 
@@ -546,6 +563,7 @@ class MallocInfo {
 
   PageGroup *page_groups_[kMaxAvailableRam / kMinMmapSize];
   int n_page_groups_;  // atomic
+  int n_sorted_page_groups_;
 };
 
 static MallocInfo malloc_info(LINKER_INITIALIZED);
@@ -613,8 +631,8 @@ static uint8_t *Allocate(size_t alignment, size_t size, AsanStackTrace *stack) {
   CHECK(size_to_allocate >= needed_size);
   CHECK(IsAligned(size_to_allocate, REDZONE));
 
-  if (FLAG_v >= 2) {
-    Printf("Allocate align: %ld size: %ld class: %d real: %ld\n",
+  if (FLAG_v >= 3) {
+    Printf("Allocate align: %zu size: %zu class: %u real: %zu\n",
          alignment, size, size_class, size_to_allocate);
   }
 
@@ -686,18 +704,22 @@ static void Deallocate(uint8_t *ptr, AsanStackTrace *stack) {
 
   // Printf("Deallocate %p\n", ptr);
   AsanChunk *m = PtrToChunk((uintptr_t)ptr);
-  if (m->chunk_state == CHUNK_QUARANTINE) {
+
+  // Flip the state atomically to avoid race on double-free.
+  uint16_t old_chunk_state = AtomicExchange(&m->chunk_state, CHUNK_QUARANTINE);
+
+  if (old_chunk_state == CHUNK_QUARANTINE) {
     Report("ERROR: AddressSanitizer attempting double-free on %p:\n", ptr);
     stack->PrintStack();
     Describe((uintptr_t)ptr, 1);
     ShowStatsAndAbort();
-  } else if (m->chunk_state != CHUNK_ALLOCATED) {
+  } else if (old_chunk_state != CHUNK_ALLOCATED) {
     Report("ERROR: AddressSanitizer attempting free on address which was not"
            " malloc()-ed: %p\n", ptr);
     stack->PrintStack();
     ShowStatsAndAbort();
   }
-  CHECK(m->chunk_state == CHUNK_ALLOCATED);
+  CHECK(old_chunk_state == CHUNK_ALLOCATED);
   CHECK(m->free_tid == AsanThread::kInvalidTid);
   CHECK(m->alloc_tid >= 0);
   AsanThread *t = asanThreadRegistry().GetCurrent();
@@ -713,7 +735,7 @@ static void Deallocate(uint8_t *ptr, AsanStackTrace *stack) {
   thread_stats.freed += m->used_size;
   thread_stats.freed_by_size[m->SizeClass()]++;
 
-  m->chunk_state = CHUNK_QUARANTINE;
+  CHECK(m->chunk_state == CHUNK_QUARANTINE);
   if (t) {
     AsanThreadLocalMallocStorage *ms = &t->malloc_storage();
     CHECK(!m->next);
@@ -894,7 +916,7 @@ inline size_t FakeStack::ComputeSizeClass(size_t alloc_size) {
   size_t log = Log2(rounded_size);
   CHECK(alloc_size <= (1UL << log));
   if (!(alloc_size > (1UL << (log-1)))) {
-    Printf("alloc_size %ld log %ld\n", alloc_size, log);
+    Printf("alloc_size %zu log %zu\n", alloc_size, log);
   }
   CHECK(alloc_size > (1UL << (log-1)));
   size_t res = log < kMinStackFrameSizeLog ? 0 : log - kMinStackFrameSizeLog;
@@ -954,7 +976,7 @@ void FakeStack::AllocateOneSizeClass(size_t size_class) {
   CHECK(ClassMmapSize(size_class) >= kPageSize);
   uintptr_t new_mem = (uintptr_t)AsanMmapSomewhereOrDie(
       ClassMmapSize(size_class), __FUNCTION__);
-  // Printf("T%d new_mem[%ld]: %p-%p mmap %ld\n",
+  // Printf("T%d new_mem[%zu]: %p-%p mmap %zu\n",
   //       asanThreadRegistry().GetCurrent()->tid(),
   //       size_class, new_mem, new_mem + ClassMmapSize(size_class),
   //       ClassMmapSize(size_class));
@@ -1021,7 +1043,7 @@ size_t __asan_stack_malloc(size_t size, size_t real_stack) {
     return real_stack;
   }
   size_t ptr = t->fake_stack().AllocateStack(size, real_stack);
-  // Printf("__asan_stack_malloc %p %ld %p\n", ptr, size, real_stack);
+  // Printf("__asan_stack_malloc %p %zu %p\n", ptr, size, real_stack);
   return ptr;
 }
 

@@ -16,34 +16,108 @@
 #include "asan_allocator.h"
 #include "asan_interface.h"
 #include "asan_internal.h"
-#include "asan_mac.h"
 #include "asan_mapping.h"
 #include "asan_stack.h"
 #include "asan_stats.h"
 #include "asan_thread_registry.h"
 #include "interception/interception.h"
 
-#include <new>
+// Use macro to describe if specific function should be
+// intercepted on a given platform.
+#if !defined(_WIN32)
+# define ASAN_INTERCEPT_ATOLL_AND_STRTOLL 1
+#else
+# define ASAN_INTERCEPT_ATOLL_AND_STRTOLL 0
+#endif
 
-#if defined(__APPLE__)
-// FIXME(samsonov): Gradually replace system headers with declarations of
-// intercepted functions.
-#include <pthread.h>
-#include <signal.h>
-#include <string.h>
-#include <strings.h>
-#endif  // __APPLE__
+#if !defined(__APPLE__)
+# define ASAN_INTERCEPT_STRNLEN 1
+#else
+# define ASAN_INTERCEPT_STRNLEN 0
+#endif
+
+#if defined(ANDROID) || defined(_WIN32)
+# define ASAN_INTERCEPT_SIGNAL_AND_SIGACTION 0
+#else
+# define ASAN_INTERCEPT_SIGNAL_AND_SIGACTION 1
+#endif
+
+// Use extern declarations of intercepted functions on Mac and Windows
+// to avoid including system headers.
+#if defined(__APPLE__) || (defined(_WIN32) && !defined(_DLL))
+extern "C" {
+// signal.h
+# if ASAN_INTERCEPT_SIGNAL_AND_SIGACTION
+struct sigaction;
+int sigaction(int sig, const struct sigaction *act,
+              struct sigaction *oldact);
+void *signal(int signum, void *handler);
+# endif
+
+// setjmp.h
+void longjmp(void* env, int value);
+# if !defined(_WIN32)
+void _longjmp(void *env, int value);
+# endif
+
+// string.h / strings.h
+int memcmp(const void *a1, const void *a2, size_t size);
+void* memmove(void *to, const void *from, size_t size);
+void* memcpy(void *to, const void *from, size_t size);
+void* memset(void *block, int c, size_t size);
+char* strchr(const char *str, int c);
+# if defined(__APPLE__)
+char* index(const char *string, int c);
+# endif
+char* strcat(char *to, const char* from);  // NOLINT
+char* strcpy(char *to, const char* from);  // NOLINT
+char* strncpy(char *to, const char* from, size_t size);
+int strcmp(const char *s1, const char* s2);
+int strncmp(const char *s1, const char* s2, size_t size);
+# if !defined(_WIN32)
+int strcasecmp(const char *s1, const char *s2);
+int strncasecmp(const char *s1, const char *s2, size_t n);
+char* strdup(const char *s);
+# endif
+size_t strlen(const char *s);
+# if ASAN_INTERCEPT_STRNLEN
+size_t strnlen(const char *s, size_t maxlen);
+# endif
+
+// stdlib.h
+int atoi(const char *nptr);
+long atol(const char *nptr);  // NOLINT
+long strtol(const char *nptr, char **endptr, int base);  // NOLINT
+# if ASAN_INTERCEPT_ATOLL_AND_STRTOLL
+long long atoll(const char *nptr);  // NOLINT
+long long strtoll(const char *nptr, char **endptr, int base);  // NOLINT
+# endif
+
+// Windows threads.
+# if defined(_WIN32)
+__declspec(dllimport)
+void* __stdcall CreateThread(void *sec, size_t st, void* start,
+                             void *arg, DWORD fl, DWORD *id);
+# endif
+
+// Posix threads.
+# if !defined(_WIN32)
+int pthread_create(void *thread, void *attr, void *(*start_routine)(void*),
+                   void *arg);
+# endif
+}  // extern "C"
+#endif
 
 namespace __asan {
 
 // Instruments read/write access to a single byte in memory.
 // On error calls __asan_report_error, which aborts the program.
-static NOINLINE void AccessAddress(uintptr_t address, bool isWrite) {
-  if (__asan_address_is_poisoned((void*)address)) {
-    GET_BP_PC_SP;
-    __asan_report_error(pc, bp, sp, address, isWrite, /* access_size */ 1);
-  }
-}
+#define ACCESS_ADDRESS(address, isWrite)   do {         \
+  if (AddressIsPoisoned(address)) {                     \
+    GET_CURRENT_PC_BP_SP;                               \
+    __asan_report_error(pc, bp, sp, address, isWrite, /* access_size */ 1); \
+  } \
+} while (0)
 
 // We implement ACCESS_MEMORY_RANGE, ASAN_READ_RANGE,
 // and ASAN_WRITE_RANGE as macro instead of function so
@@ -56,8 +130,8 @@ static NOINLINE void AccessAddress(uintptr_t address, bool isWrite) {
 #define ACCESS_MEMORY_RANGE(offset, size, isWrite) do { \
   if (size > 0) { \
     uintptr_t ptr = (uintptr_t)(offset); \
-    AccessAddress(ptr, isWrite); \
-    AccessAddress(ptr + (size) - 1, isWrite); \
+    ACCESS_ADDRESS(ptr, isWrite); \
+    ACCESS_ADDRESS(ptr + (size) - 1, isWrite); \
   } \
 } while (0)
 
@@ -152,7 +226,7 @@ size_t internal_strlen(const char *s) {
 }
 
 size_t internal_strnlen(const char *s, size_t maxlen) {
-#ifndef __APPLE__
+#if ASAN_INTERCEPT_STRNLEN
   if (REAL(strnlen) != NULL) {
     return REAL(strnlen)(s, maxlen);
   }
@@ -187,6 +261,19 @@ int internal_memcmp(const void* s1, const void* s2, size_t n) {
     if (*t1 != *t2)
       return *t1 < *t2 ? -1 : 1;
   return 0;
+}
+
+// Should not be used in performance-critical places.
+void* internal_memset(void* s, int c, size_t n) {
+  // The next line prevents Clang from making a call to memset() instead of the
+  // loop below.
+  // FIXME: building the runtime with -ffreestanding is a better idea. However
+  // there currently are linktime problems due to PR12396.
+  char volatile *t = (char*)s;
+  for (size_t i = 0; i < n; ++i, ++t) {
+    *t = c;
+  }
+  return s;
 }
 
 char *internal_strstr(const char *haystack, const char *needle) {
@@ -234,33 +321,6 @@ char *internal_strncpy(char *dst, const char *src, size_t n) {
 // ---------------------- Wrappers ---------------- {{{1
 using namespace __asan;  // NOLINT
 
-#define OPERATOR_NEW_BODY \
-  GET_STACK_TRACE_HERE_FOR_MALLOC;\
-  return asan_memalign(0, size, &stack);
-
-#ifdef ANDROID
-void *operator new(size_t size) { OPERATOR_NEW_BODY; }
-void *operator new[](size_t size) { OPERATOR_NEW_BODY; }
-#else
-void *operator new(size_t size) throw(std::bad_alloc) { OPERATOR_NEW_BODY; }
-void *operator new[](size_t size) throw(std::bad_alloc) { OPERATOR_NEW_BODY; }
-void *operator new(size_t size, std::nothrow_t const&) throw()
-{ OPERATOR_NEW_BODY; }
-void *operator new[](size_t size, std::nothrow_t const&) throw()
-{ OPERATOR_NEW_BODY; }
-#endif
-
-#define OPERATOR_DELETE_BODY \
-  GET_STACK_TRACE_HERE_FOR_FREE(ptr);\
-  asan_free(ptr, &stack);
-
-void operator delete(void *ptr) throw() { OPERATOR_DELETE_BODY; }
-void operator delete[](void *ptr) throw() { OPERATOR_DELETE_BODY; }
-void operator delete(void *ptr, std::nothrow_t const&) throw()
-{ OPERATOR_DELETE_BODY; }
-void operator delete[](void *ptr, std::nothrow_t const&) throw()
-{ OPERATOR_DELETE_BODY;}
-
 static thread_return_t THREAD_CALLING_CONV asan_thread_start(void *arg) {
   AsanThread *t = (AsanThread*)arg;
   asanThreadRegistry().SetCurrent(t);
@@ -278,7 +338,7 @@ INTERCEPTOR(int, pthread_create, void *thread,
 }
 #endif  // !_WIN32
 
-#if !defined(ANDROID) && !defined(_WIN32)
+#if ASAN_INTERCEPT_SIGNAL_AND_SIGACTION
 INTERCEPTOR(void*, signal, int signum, void *handler) {
   if (!AsanInterceptsSignal(signum)) {
     return REAL(signal)(signum, handler);
@@ -293,7 +353,11 @@ INTERCEPTOR(int, sigaction, int signum, const struct sigaction *act,
   }
   return 0;
 }
-#endif  // !ANDROID && !_WIN32
+#elif ASAN_POSIX
+// We need to have defined REAL(sigaction) on posix systems.
+DEFINE_REAL(int, sigaction, int signum, const struct sigaction *act,
+    struct sigaction *oldact);
+#endif  // ASAN_INTERCEPT_SIGNAL_AND_SIGACTION
 
 INTERCEPTOR(void, longjmp, void *env, int val) {
   __asan_handle_no_return();
@@ -415,7 +479,7 @@ INTERCEPTOR(void*, memmove, void *to, const void *from, size_t size) {
 }
 
 INTERCEPTOR(void*, memset, void *block, int c, size_t size) {
-  // memset is called inside INTERCEPT_FUNCTION on Mac.
+  // memset is called inside Printf.
   if (asan_init_is_running) {
     return REAL(memset)(block, c, size);
   }
@@ -441,11 +505,6 @@ INTERCEPTOR(char*, index, const char *string, int c)
   ALIAS(WRAPPER_NAME(strchr));
 #else
 DEFINE_REAL(char*, index, const char *string, int c);
-#endif
-
-#ifdef ANDROID
-DEFINE_REAL(int, sigaction, int signum, const struct sigaction *act,
-    struct sigaction *oldact);
 #endif
 
 INTERCEPTOR(int, strcasecmp, const char *s1, const char *s2) {
@@ -575,7 +634,7 @@ INTERCEPTOR(char*, strncpy, char *to, const char *from, size_t size) {
   return REAL(strncpy)(to, from, size);
 }
 
-#ifndef __APPLE__
+#if ASAN_INTERCEPT_STRNLEN
 INTERCEPTOR(size_t, strnlen, const char *s, size_t maxlen) {
   ENSURE_ASAN_INITED();
   size_t length = REAL(strnlen)(s, maxlen);
@@ -584,7 +643,105 @@ INTERCEPTOR(size_t, strnlen, const char *s, size_t maxlen) {
   }
   return length;
 }
-#endif
+#endif  // ASAN_INTERCEPT_STRNLEN
+
+static inline bool IsValidStrtolBase(int base) {
+  return (base == 0) || (2 <= base && base <= 36);
+}
+
+static inline void FixRealStrtolEndptr(const char *nptr, char **endptr) {
+  CHECK(endptr != NULL);
+  if (nptr == *endptr) {
+    // No digits were found at strtol call, we need to find out the last
+    // symbol accessed by strtoll on our own.
+    // We get this symbol by skipping leading blanks and optional +/- sign.
+    while (IsSpace(*nptr)) nptr++;
+    if (*nptr == '+' || *nptr == '-') nptr++;
+    *endptr = (char*)nptr;
+  }
+  CHECK(*endptr >= nptr);
+}
+
+INTERCEPTOR(long, strtol, const char *nptr,  // NOLINT
+            char **endptr, int base) {
+  ENSURE_ASAN_INITED();
+  if (!FLAG_replace_str) {
+    return REAL(strtol)(nptr, endptr, base);
+  }
+  char *real_endptr;
+  long result = REAL(strtol)(nptr, &real_endptr, base);  // NOLINT
+  if (endptr != NULL) {
+    *endptr = real_endptr;
+  }
+  if (IsValidStrtolBase(base)) {
+    FixRealStrtolEndptr(nptr, &real_endptr);
+    ASAN_READ_RANGE(nptr, (real_endptr - nptr) + 1);
+  }
+  return result;
+}
+
+INTERCEPTOR(int, atoi, const char *nptr) {
+  ENSURE_ASAN_INITED();
+  if (!FLAG_replace_str) {
+    return REAL(atoi)(nptr);
+  }
+  char *real_endptr;
+  // "man atoi" tells that behavior of atoi(nptr) is the same as
+  // strtol(nptr, NULL, 10), i.e. it sets errno to ERANGE if the
+  // parsed integer can't be stored in *long* type (even if it's
+  // different from int). So, we just imitate this behavior.
+  int result = REAL(strtol)(nptr, &real_endptr, 10);
+  FixRealStrtolEndptr(nptr, &real_endptr);
+  ASAN_READ_RANGE(nptr, (real_endptr - nptr) + 1);
+  return result;
+}
+
+INTERCEPTOR(long, atol, const char *nptr) {  // NOLINT
+  ENSURE_ASAN_INITED();
+  if (!FLAG_replace_str) {
+    return REAL(atol)(nptr);
+  }
+  char *real_endptr;
+  long result = REAL(strtol)(nptr, &real_endptr, 10);  // NOLINT
+  FixRealStrtolEndptr(nptr, &real_endptr);
+  ASAN_READ_RANGE(nptr, (real_endptr - nptr) + 1);
+  return result;
+}
+
+#if ASAN_INTERCEPT_ATOLL_AND_STRTOLL
+INTERCEPTOR(long long, strtoll, const char *nptr,  // NOLINT
+            char **endptr, int base) {
+  ENSURE_ASAN_INITED();
+  if (!FLAG_replace_str) {
+    return REAL(strtoll)(nptr, endptr, base);
+  }
+  char *real_endptr;
+  long long result = REAL(strtoll)(nptr, &real_endptr, base);  // NOLINT
+  if (endptr != NULL) {
+    *endptr = real_endptr;
+  }
+  // If base has unsupported value, strtoll can exit with EINVAL
+  // without reading any characters. So do additional checks only
+  // if base is valid.
+  if (IsValidStrtolBase(base)) {
+    FixRealStrtolEndptr(nptr, &real_endptr);
+    ASAN_READ_RANGE(nptr, (real_endptr - nptr) + 1);
+  }
+  return result;
+}
+
+INTERCEPTOR(long long, atoll, const char *nptr) {  // NOLINT
+  ENSURE_ASAN_INITED();
+  if (!FLAG_replace_str) {
+    return REAL(atoll)(nptr);
+  }
+  char *real_endptr;
+  long long result = REAL(strtoll)(nptr, &real_endptr, 10);  // NOLINT
+  FixRealStrtolEndptr(nptr, &real_endptr);
+  ASAN_READ_RANGE(nptr, (real_endptr - nptr) + 1);
+  return result;
+}
+#endif  // ASAN_INTERCEPT_ATOLL_AND_STRTOLL
 
 #if defined(_WIN32)
 INTERCEPTOR_WINAPI(DWORD, CreateThread,
@@ -610,25 +767,18 @@ void InitializeWindowsInterceptors() {
 // ---------------------- InitializeAsanInterceptors ---------------- {{{1
 namespace __asan {
 void InitializeAsanInterceptors() {
+  static bool was_called_once;
+  CHECK(was_called_once == false);
+  was_called_once = true;
   // Intercept mem* functions.
   CHECK(INTERCEPT_FUNCTION(memcmp));
   CHECK(INTERCEPT_FUNCTION(memmove));
   CHECK(INTERCEPT_FUNCTION(memset));
-#ifdef __APPLE__
-  // Wrap memcpy() on OS X 10.6 only, because on 10.7 memcpy() and memmove()
-  // are resolved into memmove$VARIANT$sse42.
-  // See also http://code.google.com/p/address-sanitizer/issues/detail?id=34.
-  // TODO(glider): need to check dynamically that memcpy() and memmove() are
-  // actually the same function.
-  if (GetMacosVersion() == MACOS_VERSION_SNOW_LEOPARD) {
+  if (PLATFORM_HAS_DIFFERENT_MEMCPY_AND_MEMMOVE) {
     CHECK(INTERCEPT_FUNCTION(memcpy));
   } else {
     REAL(memcpy) = REAL(memmove);
   }
-#else
-  // Always wrap memcpy() on non-Darwin platforms.
-  CHECK(INTERCEPT_FUNCTION(memcpy));
-#endif
 
   // Intercept str* functions.
   CHECK(INTERCEPT_FUNCTION(strcat));  // NOLINT
@@ -648,13 +798,21 @@ void InitializeAsanInterceptors() {
   CHECK(OVERRIDE_FUNCTION(index, WRAP(strchr)));
 # endif
 #endif
-#if !defined(__APPLE__)
+#if ASAN_INTERCEPT_STRNLEN
   CHECK(INTERCEPT_FUNCTION(strnlen));
+#endif
+
+  CHECK(INTERCEPT_FUNCTION(atoi));
+  CHECK(INTERCEPT_FUNCTION(atol));
+  CHECK(INTERCEPT_FUNCTION(strtol));
+#if ASAN_INTERCEPT_ATOLL_AND_STRTOLL
+  CHECK(INTERCEPT_FUNCTION(atoll));
+  CHECK(INTERCEPT_FUNCTION(strtoll));
 #endif
 
   // Intecept signal- and jump-related functions.
   CHECK(INTERCEPT_FUNCTION(longjmp));
-#if !defined(ANDROID) && !defined(_WIN32)
+#if ASAN_INTERCEPT_SIGNAL_AND_SIGACTION
   CHECK(INTERCEPT_FUNCTION(sigaction));
   CHECK(INTERCEPT_FUNCTION(signal));
 #endif
@@ -672,14 +830,6 @@ void InitializeAsanInterceptors() {
   // Intercept threading-related functions
 #if !defined(_WIN32)
   CHECK(INTERCEPT_FUNCTION(pthread_create));
-# if defined(__APPLE__)
-  // We don't need to intercept pthread_workqueue_additem_np() to support the
-  // libdispatch API, but it helps us to debug the unsupported functions. Let's
-  // intercept it only during verbose runs.
-  if (FLAG_v >= 2) {
-    CHECK(INTERCEPT_FUNCTION(pthread_workqueue_additem_np));
-  }
-# endif
 #endif
 
   // Some Windows-specific interceptors.
@@ -689,24 +839,11 @@ void InitializeAsanInterceptors() {
 
   // Some Mac-specific interceptors.
 #if defined(__APPLE__)
-  CHECK(INTERCEPT_FUNCTION(dispatch_async_f));
-  CHECK(INTERCEPT_FUNCTION(dispatch_sync_f));
-  CHECK(INTERCEPT_FUNCTION(dispatch_after_f));
-  CHECK(INTERCEPT_FUNCTION(dispatch_barrier_async_f));
-  CHECK(INTERCEPT_FUNCTION(dispatch_group_async_f));
-
-  // Normally CFStringCreateCopy should not copy constant CF strings.
-  // Replacing the default CFAllocator causes constant strings to be copied
-  // rather than just returned, which leads to bugs in big applications like
-  // Chromium and WebKit, see
-  // http://code.google.com/p/address-sanitizer/issues/detail?id=10
-  // Until this problem is fixed we need to check that the string is
-  // non-constant before calling CFStringCreateCopy.
-  CHECK(INTERCEPT_FUNCTION(CFStringCreateCopy));
+  InitializeMacInterceptors();
 #endif
 
   if (FLAG_v > 0) {
-    Printf("AddressSanitizer: libc interceptors initialized\n");
+    Report("AddressSanitizer: libc interceptors initialized\n");
   }
 }
 

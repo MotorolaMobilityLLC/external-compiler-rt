@@ -39,14 +39,18 @@ int    FLAG_report_globals;
 size_t FLAG_malloc_context_size = kMallocContextSize;
 uintptr_t FLAG_large_malloc;
 bool   FLAG_handle_segv;
+bool   FLAG_use_sigaltstack;
 bool   FLAG_replace_str;
 bool   FLAG_replace_intrin;
 bool   FLAG_replace_cfallocator;  // Used on Mac only.
 size_t FLAG_max_malloc_fill_size = 0;
 bool   FLAG_use_fake_stack;
+bool   FLAG_abort_on_error;
 int    FLAG_exitcode = ASAN_DEFAULT_FAILURE_EXITCODE;
 bool   FLAG_allow_user_poisoning;
 int    FLAG_sleep_before_dying;
+bool   FLAG_unmap_shadow_on_exit;
+bool   FLAG_disable_core;
 
 // -------------------------- Globals --------------------- {{{1
 int asan_inited;
@@ -66,9 +70,9 @@ void ShowStatsAndAbort() {
 static void PrintBytes(const char *before, uintptr_t *a) {
   uint8_t *bytes = (uint8_t*)a;
   size_t byte_num = (__WORDSIZE) / 8;
-  Printf("%s%p:", before, (uintptr_t)a);
+  Printf("%s%p:", before, (void*)a);
   for (size_t i = 0; i < byte_num; i++) {
-    Printf(" %lx%lx", bytes[i] >> 4, bytes[i] & 15);
+    Printf(" %x%x", bytes[i] >> 4, bytes[i] & 15);
   }
   Printf("\n");
 }
@@ -106,20 +110,27 @@ size_t ReadFileToBuffer(const char *file_name, char **buff,
 
 void AsanDie() {
   static int num_calls = 0;
-  if (AtomicInc(&num_calls) > 1) return;  // Don't die twice.
+  if (AtomicInc(&num_calls) > 1) {
+    // Don't die twice - run a busy loop.
+    while (1) { }
+  }
   if (FLAG_sleep_before_dying) {
     Report("Sleeping for %d second(s)\n", FLAG_sleep_before_dying);
     SleepForSeconds(FLAG_sleep_before_dying);
   }
+  if (FLAG_unmap_shadow_on_exit)
+    AsanUnmapOrDie((void*)kLowShadowBeg, kHighShadowEnd - kLowShadowBeg);
   if (death_callback)
     death_callback();
+  if (FLAG_abort_on_error)
+    Abort();
   Exit(FLAG_exitcode);
 }
 
 // ---------------------- mmap -------------------- {{{1
 void OutOfMemoryMessageAndDie(const char *mem_type, size_t size) {
   Report("ERROR: AddressSanitizer failed to allocate "
-         "0x%lx (%ld) bytes of %s\n",
+         "0x%zx (%zd) bytes of %s\n",
          size, size, mem_type);
   PRINT_CURRENT_STACK();
   ShowStatsAndAbort();
@@ -170,14 +181,14 @@ static bool DescribeStackAddress(uintptr_t addr, uintptr_t access_size) {
   internal_strncat(buf, frame_descr,
                    Min(kBufSize,
                        static_cast<intptr_t>(name_end - frame_descr)));
-  Printf("Address %p is located at offset %ld "
+  Printf("Address %p is located at offset %zu "
          "in frame <%s> of T%d's stack:\n",
          addr, offset, buf, t->tid());
   // Report the number of stack objects.
   char *p;
   size_t n_objects = internal_simple_strtoll(name_end, &p, 10);
   CHECK(n_objects > 0);
-  Printf("  This frame has %ld object(s):\n", n_objects);
+  Printf("  This frame has %zu object(s):\n", n_objects);
   // Report all objects in this frame.
   for (size_t i = 0; i < n_objects; i++) {
     size_t beg, size;
@@ -194,7 +205,7 @@ static bool DescribeStackAddress(uintptr_t addr, uintptr_t access_size) {
     buf[0] = 0;
     internal_strncat(buf, p, Min(kBufSize, len));
     p += len;
-    Printf("    [%ld, %ld) '%s'\n", beg, beg + size, buf);
+    Printf("    [%zu, %zu) '%s'\n", beg, beg + size, buf);
   }
   Printf("HINT: this may be a false positive if your program uses "
          "some custom stack unwind mechanism\n"
@@ -218,10 +229,10 @@ static NOINLINE void DescribeAddress(uintptr_t addr, uintptr_t access_size) {
 // -------------------------- Run-time entry ------------------- {{{1
 // exported functions
 #define ASAN_REPORT_ERROR(type, is_write, size)                     \
-NOINLINE ASAN_INTERFACE_ATTRIBUTE                                   \
-extern "C" void __asan_report_ ## type ## size(uintptr_t addr);     \
-extern "C" void __asan_report_ ## type ## size(uintptr_t addr) {    \
-  GET_BP_PC_SP;                                                     \
+extern "C" NOINLINE ASAN_INTERFACE_ATTRIBUTE                        \
+void __asan_report_ ## type ## size(uintptr_t addr);                \
+void __asan_report_ ## type ## size(uintptr_t addr) {               \
+  GET_CALLER_PC_BP_SP;                                              \
   __asan_report_error(pc, bp, sp, addr, is_write, size);            \
 }
 
@@ -244,21 +255,22 @@ ASAN_REPORT_ERROR(store, true, 16)
 static NOINLINE void force_interface_symbols() {
   volatile int fake_condition = 0;  // prevent dead condition elimination.
   if (fake_condition) {
-    __asan_report_load1(NULL);
-    __asan_report_load2(NULL);
-    __asan_report_load4(NULL);
-    __asan_report_load8(NULL);
-    __asan_report_load16(NULL);
-    __asan_report_store1(NULL);
-    __asan_report_store2(NULL);
-    __asan_report_store4(NULL);
-    __asan_report_store8(NULL);
-    __asan_report_store16(NULL);
+    __asan_report_load1(0);
+    __asan_report_load2(0);
+    __asan_report_load4(0);
+    __asan_report_load8(0);
+    __asan_report_load16(0);
+    __asan_report_store1(0);
+    __asan_report_store2(0);
+    __asan_report_store4(0);
+    __asan_report_store8(0);
+    __asan_report_store16(0);
     __asan_register_global(0, 0, NULL);
     __asan_register_globals(NULL, 0);
     __asan_unregister_globals(NULL, 0);
     __asan_set_death_callback(NULL);
     __asan_set_error_report_callback(NULL);
+    __asan_handle_no_return();
   }
 }
 
@@ -293,7 +305,7 @@ int __asan_set_error_exit_code(int exit_code) {
   return old;
 }
 
-void __asan_handle_no_return() {
+void NOINLINE __asan_handle_no_return() {
   int local_stack;
   AsanThread *curr_thread = asanThreadRegistry().GetCurrent();
   CHECK(curr_thread);
@@ -370,10 +382,10 @@ void __asan_report_error(uintptr_t pc, uintptr_t bp, uintptr_t sp,
   }
 
   Report("ERROR: AddressSanitizer %s on address "
-         "%p at pc 0x%lx bp 0x%lx sp 0x%lx\n",
+         "%p at pc 0x%zx bp 0x%zx sp 0x%zx\n",
          bug_descr, addr, pc, bp, sp);
 
-  Printf("%s of size %d at %p thread T%d\n",
+  Printf("%s of size %zu at %p thread T%d\n",
          access_size ? (is_write ? "WRITE" : "READ") : "ACCESS",
          access_size, addr, curr_tid);
 
@@ -438,6 +450,7 @@ void __asan_init() {
   FLAG_poison_shadow = IntFlagValue(options, "poison_shadow=", 1);
   FLAG_report_globals = IntFlagValue(options, "report_globals=", 1);
   FLAG_handle_segv = IntFlagValue(options, "handle_segv=", ASAN_NEEDS_SEGV);
+  FLAG_use_sigaltstack = IntFlagValue(options, "use_sigaltstack=", 0);
   FLAG_symbolize = IntFlagValue(options, "symbolize=", 1);
   FLAG_demangle = IntFlagValue(options, "demangle=", 1);
   FLAG_debug = IntFlagValue(options, "debug=", 0);
@@ -450,19 +463,28 @@ void __asan_init() {
   FLAG_allow_user_poisoning = IntFlagValue(options,
                                            "allow_user_poisoning=", 1);
   FLAG_sleep_before_dying = IntFlagValue(options, "sleep_before_dying=", 0);
+  FLAG_abort_on_error = IntFlagValue(options, "abort_on_error=", 0);
+  FLAG_unmap_shadow_on_exit = IntFlagValue(options, "unmap_shadow_on_exit=", 0);
+  // By default, disable core dumper on 64-bit --
+  // it makes little sense to dump 16T+ core.
+  FLAG_disable_core = IntFlagValue(options, "disable_core=", __WORDSIZE == 64);
+
+  FLAG_quarantine_size = IntFlagValue(options, "quarantine_size=",
+      (ASAN_LOW_MEMORY) ? 1UL << 24 : 1UL << 28);
+
+  if (FLAG_v) {
+    Report("Parsed ASAN_OPTIONS: %s\n", options);
+  }
 
   if (FLAG_atexit) {
     Atexit(asan_atexit);
   }
 
-  FLAG_quarantine_size = IntFlagValue(options, "quarantine_size=",
-      (ASAN_LOW_MEMORY) ? 1UL << 24 : 1UL << 28);
-
   // interceptors
   InitializeAsanInterceptors();
 
   ReplaceSystemMalloc();
-  InstallSignalHandlers();
+  ReplaceOperatorsNewAndDelete();
 
   if (FLAG_v) {
     Printf("|| `[%p, %p]` || HighMem    ||\n", kHighMemBeg, kHighMemEnd);
@@ -478,17 +500,16 @@ void __asan_init() {
            MEM_TO_SHADOW(kLowShadowEnd),
            MEM_TO_SHADOW(kHighShadowBeg),
            MEM_TO_SHADOW(kHighShadowEnd));
-    Printf("red_zone=%ld\n", FLAG_redzone);
-    Printf("malloc_context_size=%ld\n", (int)FLAG_malloc_context_size);
+    Printf("red_zone=%zu\n", (size_t)FLAG_redzone);
+    Printf("malloc_context_size=%zu\n", (size_t)FLAG_malloc_context_size);
 
-    Printf("SHADOW_SCALE: %lx\n", SHADOW_SCALE);
-    Printf("SHADOW_GRANULARITY: %lx\n", SHADOW_GRANULARITY);
-    Printf("SHADOW_OFFSET: %lx\n", SHADOW_OFFSET);
+    Printf("SHADOW_SCALE: %zx\n", (size_t)SHADOW_SCALE);
+    Printf("SHADOW_GRANULARITY: %zx\n", (size_t)SHADOW_GRANULARITY);
+    Printf("SHADOW_OFFSET: %zx\n", (size_t)SHADOW_OFFSET);
     CHECK(SHADOW_SCALE >= 3 && SHADOW_SCALE <= 7);
   }
 
-  if (__WORDSIZE == 64) {
-    // Disable core dumper -- it makes little sense to dump 16T+ core.
+  if (FLAG_disable_core) {
     AsanDisableCoreDumper();
   }
 
@@ -508,6 +529,8 @@ void __asan_init() {
     AsanDumpProcessMap();
     AsanDie();
   }
+
+  InstallSignalHandlers();
 
   // On Linux AsanThread::ThreadStart() calls malloc() that's why asan_inited
   // should be set to 1 prior to initializing the threads.
