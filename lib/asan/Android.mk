@@ -31,6 +31,7 @@ asan_rtl_files := \
 	asan_linux.cc \
 	asan_malloc_linux.cc \
 	asan_malloc_mac.cc \
+	asan_new_delete.cc	\
 	asan_poisoning.cc	\
 	asan_posix.cc \
 	asan_printf.cc	\
@@ -87,7 +88,9 @@ include $(CLEAR_VARS)
 
 LOCAL_MODULE := libasan_preload
 LOCAL_MODULE_TAGS := eng
-LOCAL_C_INCLUDES := bionic
+LOCAL_C_INCLUDES := \
+  bionic \
+  external/stlport/stlport
 LOCAL_CFLAGS += $(asan_rtl_cflags)
 LOCAL_SRC_FILES := $(asan_rtl_files)
 LOCAL_CPP_EXTENSION := .cc
