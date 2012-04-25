@@ -173,8 +173,8 @@ RTL_HDR=asan_allocator.h \
 	asan_interceptors.h \
 	asan_interface.h \
 	asan_lock.h \
-	asan_mac.h \
 	asan_mapping.h \
+	asan_procmaps.h \
 	asan_stack.h \
 	asan_stats.h \
 	asan_thread.h \
@@ -192,6 +192,7 @@ LIBASAN_OBJ=$(BIN)/asan_rtl$(SUFF).o \
 	    $(BIN)/asan_mac$(SUFF).o \
 	    $(BIN)/asan_malloc_linux$(SUFF).o \
 	    $(BIN)/asan_malloc_mac$(SUFF).o \
+	    $(BIN)/asan_new_delete$(SUFF).o \
 	    $(BIN)/asan_poisoning$(SUFF).o  \
 	    $(BIN)/asan_posix$(SUFF).o  \
 	    $(BIN)/asan_printf$(SUFF).o  \
