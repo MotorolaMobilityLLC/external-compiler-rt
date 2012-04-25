@@ -36,6 +36,7 @@ size_t internal_strlen(const char *s);
 size_t internal_strnlen(const char *s, size_t maxlen);
 char* internal_strchr(const char *s, int c);
 void* internal_memchr(const void* s, int c, size_t n);
+void* internal_memset(void *s, int c, size_t n);
 int internal_memcmp(const void* s1, const void* s2, size_t n);
 char *internal_strstr(const char *haystack, const char *needle);
 char *internal_strncat(char *dst, const char *src, size_t n);
@@ -45,6 +46,10 @@ char *internal_strncpy(char *dst, const char *src, size_t n);
 int64_t internal_simple_strtoll(const char *nptr, char **endptr, int base);
 
 void InitializeAsanInterceptors();
+
+#if defined(__APPLE__)
+void InitializeMacInterceptors();
+#endif  // __APPLE__
 
 }  // namespace __asan
 
