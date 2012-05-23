@@ -14,6 +14,7 @@
 
 * For JellyBean: Synced to upstream r152058
 
+* Cherry-pick on 2012/05/23: https://llvm.org/svn/llvm-project/compiler-rt/trunk@157318 for ASan (Contact srhines for merge questions.)
 * Recent downstreaming on 2012/03/08: Synced to r152058 (Contact srhines for merge questions.)
 
 TODO: This is still not building by default (no Android.mk files are present
