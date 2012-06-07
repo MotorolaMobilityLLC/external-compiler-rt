@@ -16,6 +16,7 @@
 #
 
 LOCAL_PATH := $(call my-dir)
+COMPILER_RT_PATH := $(LOCAL_PATH)
 
 #=====================================================================
 # Device Static Library: libbccCompilerRT
@@ -30,6 +31,9 @@ LOCAL_MODULE_TAGS := optional
 LOCAL_MODULE_CLASS := STATIC_LIBRARIES
 LOCAL_CLANG := true
 LOCAL_CFLAGS := -integrated-as
+
+# Pull in platform-independent functionality
+LOCAL_WHOLE_STATIC_LIBRARIES += libcompiler-rt-builtins
 
 ifeq ($(TARGET_ARCH),arm)
   LOCAL_SRC_FILES += \
@@ -93,5 +97,6 @@ include $(BUILD_STATIC_LIBRARY)
 
 endif # ifneq($(TARGET_ARCH),mips)
 
+include $(COMPILER_RT_PATH)/lib/Android.mk
 
-include $(LOCAL_PATH)/lib/asan/Android.mk
+include $(COMPILER_RT_PATH)/lib/asan/Android.mk
