@@ -33,7 +33,7 @@ LOCAL_CLANG := true
 LOCAL_CFLAGS := -integrated-as
 
 # Pull in platform-independent functionality
-LOCAL_WHOLE_STATIC_LIBRARIES += libcompiler-rt-builtins
+LOCAL_WHOLE_STATIC_LIBRARIES += libcompiler-rt-builtins libcompiler-rt-extras
 
 ifeq ($(TARGET_ARCH),arm)
   LOCAL_SRC_FILES += \

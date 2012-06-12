@@ -33,7 +33,7 @@ LOCAL_CLANG := true
 
 # Skip atomic.c since it needs to be built separately according to the docs.
 # Skip clear_cache.c since it redefines a system function on Android.
-LOCAL_SRC_FILES += \ \
+LOCAL_SRC_FILES += \
   absvdi2.c \
   absvsi2.c \
   absvti2.c \
@@ -115,7 +115,6 @@ LOCAL_SRC_FILES += \ \
   muldc3.c \
   muldf3.c \
   muldi3.c \
-  mulodi4.c \
   mulosi4.c \
   muloti4.c \
   mulsc3.c \
@@ -160,6 +159,26 @@ LOCAL_SRC_FILES += \ \
   umoddi3.c \
   umodsi3.c \
   umodti3.c
+
+include $(BUILD_STATIC_LIBRARY)
+
+
+#=====================================================================
+# Device Static Library: libcompiler-rt-extras
+#=====================================================================
+
+# These are functions that are not available in libgcc.a, so we potentially
+# need them when using a Clang-built component (i.e. -ftrapv with 64-bit
+# integer multiplies).
+include $(CLEAR_VARS)
+
+LOCAL_MODULE := libcompiler-rt-extras
+LOCAL_MODULE_TAGS := optional
+LOCAL_MODULE_CLASS := STATIC_LIBRARIES
+LOCAL_CLANG := true
+
+LOCAL_SRC_FILES += \
+  mulodi4.c
 
 include $(BUILD_STATIC_LIBRARY)
 
