@@ -15,6 +15,7 @@ import subprocess
 
 pipes = {}
 load_addresses = {}
+next_inline_frameno = 0
 
 def patch_address(frameno, addr_s):
   ''' Subtracts 1 or 2 from the top frame's address.
@@ -47,16 +48,24 @@ def android_get_load_address(path):
   print 'Could not make sense of readelf output!'
   sys.exit(1)
 
+def postprocess_file_name(file_name, paths_to_cut):
+  for path_to_cut in paths_to_cut:
+    file_name = re.sub(".*" + path_to_cut, "", file_name)
+  file_name = re.sub(".*asan_[a-z_]*.(cc|h):[0-9]*", "[asan_rtl]", file_name)
+  file_name = re.sub(".*crtstuff.c:0", "???:0", file_name)
+  return file_name
+
 # TODO(glider): need some refactoring here
 def symbolize_addr2line(line, binary_prefix, paths_to_cut):
+  global next_inline_frameno
   # Strip the log prefix ("I/asanwrapper( 1196): ").
   line = re.sub(r'^[A-Z]/[^\s]*\(\s*\d+\): ', '', line)
   #0 0x7f6e35cf2e45  (/blah/foo.so+0x11fe45)
-  match = re.match(r'^(\s*#([0-9]+) *0x[0-9a-f]+) *\((.*)\+(0x[0-9a-f]+)\)', line, re.UNICODE)
+  match = re.match(r'^(\s*#)([0-9]+) *(0x[0-9a-f]+) *\((.*)\+(0x[0-9a-f]+)\)', line, re.UNICODE)
   if match:
     frameno = match.group(2)
-    binary = match.group(3)
-    addr = match.group(4)
+    binary = match.group(4)
+    addr = match.group(5)
     addr = patch_address(frameno, addr)
 
     if binary.startswith('/'):
@@ -67,22 +76,36 @@ def symbolize_addr2line(line, binary_prefix, paths_to_cut):
     addr = hex(int(addr, 16) + load_addr)
 
     if not pipes.has_key(binary):
-      pipes[binary] = subprocess.Popen(["addr2line", "-f", "-e", binary],
+      pipes[binary] = subprocess.Popen(["addr2line", "-i", "-f", "-e", binary],
                          stdin=subprocess.PIPE, stdout=subprocess.PIPE)
     p = pipes[binary]
+    frames = []
     try:
       print >>p.stdin, addr
-      function_name = p.stdout.readline().rstrip()
-      file_name     = p.stdout.readline().rstrip()
+      # This will trigger a "??" response from addr2line so we know when to stop
+      print >>p.stdin
+      while True:
+        function_name = p.stdout.readline().rstrip()
+        file_name     = p.stdout.readline().rstrip()
+        if function_name in ['??', '']:
+          break
+        file_name = postprocess_file_name(file_name, paths_to_cut)
+        frames.append((function_name, file_name))
     except:
-      function_name = ""
-      file_name = ""
-    for path_to_cut in paths_to_cut:
-      file_name = re.sub(".*" + path_to_cut, "", file_name)
-    file_name = re.sub(".*asan_[a-z_]*.(cc|h):[0-9]*", "[asan_rtl]", file_name)
-    file_name = re.sub(".*crtstuff.c:0", "???:0", file_name)
-
-    print match.group(1).encode('utf-8'), "in", function_name, file_name
+      pass
+    if not frames:
+      frames.append(('', ''))
+      # Consume another pair of "??" lines
+      try:
+        p.stdout.readline()
+        p.stdout.readline()
+      except:
+        pass
+    for frame in frames:
+      inline_frameno = next_inline_frameno
+      next_inline_frameno += 1
+      print "%s%d" % (match.group(1).encode('utf-8'), inline_frameno), \
+          match.group(3).encode('utf-8'), "in", frame[0], frame[1]
   else:
     print line.rstrip().encode('utf-8')
 
