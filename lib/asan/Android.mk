@@ -38,8 +38,15 @@ asan_rtl_files := \
 	asan_stack.cc	\
 	asan_stats.cc	\
 	asan_thread.cc	\
-	asan_thread_registry.cc	\
-	interception/interception_linux.cc
+	asan_thread_registry.cc \
+	../interception/interception_linux.cc \
+	../sanitizer_common/sanitizer_allocator.cc \
+	../sanitizer_common/sanitizer_common.cc \
+	../sanitizer_common/sanitizer_libc.cc \
+	../sanitizer_common/sanitizer_linux.cc \
+	../sanitizer_common/sanitizer_posix.cc \
+	../sanitizer_common/sanitizer_printf.cc \
+	../sanitizer_common/sanitizer_symbolizer.cc
 
 asan_rtl_cflags := \
 	-fvisibility=hidden \
@@ -76,7 +83,7 @@ include $(CLEAR_VARS)
 
 LOCAL_MODULE := libasan
 LOCAL_MODULE_TAGS := optional
-LOCAL_C_INCLUDES := bionic
+LOCAL_C_INCLUDES := bionic external/compiler-rt/lib
 LOCAL_CFLAGS += $(asan_rtl_cflags)
 LOCAL_SRC_FILES := asan_android_stub.cc
 LOCAL_CPP_EXTENSION := .cc
@@ -90,7 +97,8 @@ LOCAL_MODULE := libasan_preload
 LOCAL_MODULE_TAGS := eng
 LOCAL_C_INCLUDES := \
   bionic \
-  external/stlport/stlport
+  external/stlport/stlport \
+  external/compiler-rt/lib
 LOCAL_CFLAGS += $(asan_rtl_cflags)
 LOCAL_SRC_FILES := $(asan_rtl_files)
 LOCAL_CPP_EXTENSION := .cc
@@ -120,7 +128,8 @@ LOCAL_MODULE_TAGS := tests
 LOCAL_C_INCLUDES := \
         bionic \
         external/stlport/stlport \
-        external/gtest/include
+        external/gtest/include \
+        external/compiler-rt/lib
 LOCAL_CFLAGS += \
         -Wno-unused-parameter \
         -Wno-sign-compare \
@@ -138,7 +147,8 @@ LOCAL_MODULE_TAGS := tests
 LOCAL_C_INCLUDES := \
         bionic \
         external/stlport/stlport \
-        external/gtest/include
+        external/gtest/include \
+        external/compiler-rt/lib
 LOCAL_CFLAGS += $(asan_test_cflags)
 LOCAL_SRC_FILES := $(asan_test_files)
 LOCAL_CPP_EXTENSION := .cc
