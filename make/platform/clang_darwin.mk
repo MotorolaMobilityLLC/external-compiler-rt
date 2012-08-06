@@ -12,6 +12,7 @@ CheckArches = \
   $(shell \
     result=""; \
     for arch in $(1); do \
+      if [ "$$arch" = "armv6" -o "$$arch" = "armv7" ]; then continue; fi; \
       if $(CC) -arch $$arch -c \
 	  -integrated-as \
 	  $(ProjSrcRoot)/make/platform/clang_darwin_test_input.c \
@@ -106,7 +107,7 @@ IOSSIM_DEPLOYMENT_ARGS += -isysroot $(ProjSrcRoot)/SDKs/darwin
 CFLAGS.eprintf		:= $(CFLAGS) $(OSX_DEPLOYMENT_ARGS)
 CFLAGS.10.4		:= $(CFLAGS) $(OSX_DEPLOYMENT_ARGS)
 # FIXME: We can't build ASAN with our stub SDK yet.
-CFLAGS.asan_osx         := $(CFLAGS) -mmacosx-version-min=10.5
+CFLAGS.asan_osx         := $(CFLAGS) -mmacosx-version-min=10.5 -fno-builtin
 
 CFLAGS.ios.i386		:= $(CFLAGS) $(IOSSIM_DEPLOYMENT_ARGS)
 CFLAGS.ios.x86_64	:= $(CFLAGS) $(IOSSIM_DEPLOYMENT_ARGS)
@@ -144,7 +145,8 @@ FUNCTIONS.osx	:= mulosi4 mulodi4 muloti4
 FUNCTIONS.profile_osx := GCDAProfiling
 FUNCTIONS.profile_ios := GCDAProfiling
 
-FUNCTIONS.asan_osx := $(AsanFunctions)
+FUNCTIONS.asan_osx := $(AsanFunctions) $(InterceptionFunctions) \
+                                       $(SanitizerCommonFunctions)
 
 CCKEXT_COMMON_FUNCTIONS := \
 	absvdi2 \
