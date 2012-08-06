@@ -1,4 +1,4 @@
-//===-- asan_malloc_linux.cc ------------------------------------*- C++ -*-===//
+//===-- asan_malloc_linux.cc ----------------------------------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -73,7 +73,7 @@ INTERCEPTOR(void*, calloc, size_t nmemb, size_t size) {
   if (!asan_inited) {
     // Hack: dlsym calls calloc before REAL(calloc) is retrieved from dlsym.
     const size_t kCallocPoolSize = 1024;
-    static uintptr_t calloc_memory_for_dlsym[kCallocPoolSize];
+    static uptr calloc_memory_for_dlsym[kCallocPoolSize];
     static size_t allocated;
     size_t size_in_words = ((nmemb * size) + kWordSize - 1) / kWordSize;
     void *mem = (void*)&calloc_memory_for_dlsym[allocated];
@@ -103,7 +103,7 @@ INTERCEPTOR(size_t, malloc_usable_size, void *ptr) {
   return asan_malloc_usable_size(ptr, &stack);
 }
 
-INTERCEPTOR(struct mallinfo, mallinfo) {
+INTERCEPTOR(struct mallinfo, mallinfo, void) {
   struct mallinfo res;
   REAL(memset)(&res, 0, sizeof(res));
   return res;
