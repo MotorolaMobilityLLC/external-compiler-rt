@@ -9,6 +9,12 @@
 
 include(LLVMParseArguments)
 
+# The CompilerRT build system requires CMake version 2.8.8 or higher in order
+# to use its support for building convenience "libraries" as a collection of
+# .o files. This is particularly useful in producing larger, more complex
+# runtime libraries.
+cmake_minimum_required(VERSION 2.8.8)
+
 # FIXME: Below we assume that the target build of LLVM/Clang is x86, which is
 # not at all valid. Much of this can be fixed just by switching to use
 # a just-built-clang binary for the compiles.
@@ -45,5 +51,8 @@ try_compile(CAN_TARGET_I386 ${CMAKE_BINARY_DIR} ${SIMPLE_SOURCE32}
 add_subdirectory(lib)
 
 if(LLVM_INCLUDE_TESTS)
-  add_subdirectory(test)
+  # Currently the tests have not been ported to CMake, so disable this
+  # directory.
+  #
+  #add_subdirectory(test)
 endif()
