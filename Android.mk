@@ -101,6 +101,4 @@ endif # ifneq($(TARGET_ARCH),mips)
 
 include $(COMPILER_RT_PATH)/lib/Android.mk
 
-include $(COMPILER_RT_PATH)/lib/sanitizer_common/Android.mk
-
 include $(COMPILER_RT_PATH)/lib/asan/Android.mk
