@@ -12,10 +12,13 @@
  * conflicts.
  */
 
-* For JellyBean: Synced to upstream r152058
+* For JellyBean: Synced to upstream r155350
+* For JellyBean MR1: Synced to upstream r159129
 
+* Recent downstreaming on 2012/08/15: Synced to r159129 (Contact sliao for merge questions.)
 * Cherry-pick on 2012/07/27: https://llvm.org/svn/llvm-project/compiler-rt/trunk@160853 for ASan (Contact srhines for merge questions.)
 * Cherry-pick on 2012/05/23: https://llvm.org/svn/llvm-project/compiler-rt/trunk@157318 for ASan (Contact srhines for merge questions.)
+* Recent downstreaming on 2012/04/25: Synced to r155350 (Contact sliao for merge questions.)
 * Recent downstreaming on 2012/03/08: Synced to r152058 (Contact srhines for merge questions.)
 
 TODO: This is still not building by default (no Android.mk files are present
