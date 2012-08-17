@@ -22,8 +22,6 @@ COMPILER_RT_PATH := $(LOCAL_PATH)
 # Device Static Library: libbccCompilerRT
 #=====================================================================
 
-ifneq ($(TARGET_ARCH),mips)
-
 include $(CLEAR_VARS)
 
 LOCAL_MODULE := libcompiler-rt
@@ -91,13 +89,15 @@ else
       lib/i386/udivdi3.S \
       lib/i386/umoddi3.S
   else
-    $(error Unsupported TARGET_ARCH $(TARGET_ARCH))
+    ifeq ($(TARGET_ARCH),mips)
+      # nothing to add
+    else
+      $(error Unsupported TARGET_ARCH $(TARGET_ARCH))
+    endif
   endif
 endif
 
 include $(BUILD_STATIC_LIBRARY)
-
-endif # ifneq($(TARGET_ARCH),mips)
 
 include $(COMPILER_RT_PATH)/lib/Android.mk
 

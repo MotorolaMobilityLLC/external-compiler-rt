@@ -21,7 +21,6 @@ LOCAL_PATH := $(call my-dir)
 # Device Static Library: libcompiler-rt-builtins
 #=====================================================================
 
-ifneq ($(TARGET_ARCH),mips)
 
 include $(CLEAR_VARS)
 
@@ -182,5 +181,4 @@ LOCAL_SRC_FILES += \
 
 include $(BUILD_STATIC_LIBRARY)
 
-endif # ifneq($(TARGET_ARCH),mips)
 
