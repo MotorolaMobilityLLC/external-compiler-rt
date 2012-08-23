@@ -50,6 +50,7 @@ bool FindDWARFSection(uptr object_file_addr, const char *section_name,
 #ifdef ANDROID
 uptr GetListOfModules(ModuleDIContext *modules, uptr max_modules) {
   UNIMPLEMENTED();
+  return max_modules;
 }
 #else  // ANDROID
 struct DlIteratePhdrData {
