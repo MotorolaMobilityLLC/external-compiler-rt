@@ -61,7 +61,7 @@ uptr internal_write(fd_t fd, const void *buf, uptr count) {
 }
 
 uptr internal_filesize(fd_t fd) {
-  struct stat st = {};
+  struct stat st;
   if (fstat(fd, &st))
     return -1;
   return (uptr)st.st_size;
