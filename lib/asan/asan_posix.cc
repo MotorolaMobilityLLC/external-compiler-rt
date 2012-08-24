@@ -16,6 +16,7 @@
 #include "asan_internal.h"
 #include "asan_interceptors.h"
 #include "asan_mapping.h"
+#include "asan_report.h"
 #include "asan_stack.h"
 #include "asan_thread_registry.h"
 #include "sanitizer_common/sanitizer_libc.h"
@@ -40,9 +41,9 @@ static void MaybeInstallSigaction(int signum,
   REAL(memset)(&sigact, 0, sizeof(sigact));
   sigact.sa_sigaction = handler;
   sigact.sa_flags = SA_SIGINFO;
-  if (FLAG_use_sigaltstack) sigact.sa_flags |= SA_ONSTACK;
+  if (flags()->use_sigaltstack) sigact.sa_flags |= SA_ONSTACK;
   CHECK(0 == REAL(sigaction)(signum, &sigact, 0));
-  if (FLAG_v >= 1) {
+  if (flags()->verbosity >= 1) {
     Report("Installed the sigaction for signal %d\n", signum);
   }
 }
@@ -53,14 +54,7 @@ static void     ASAN_OnSIGSEGV(int, siginfo_t *siginfo, void *context) {
   if (13 != internal_write(2, "ASAN:SIGSEGV\n", 13)) Die();
   uptr pc, sp, bp;
   GetPcSpBp(context, &pc, &sp, &bp);
-  AsanReport("ERROR: AddressSanitizer crashed on unknown address %p"
-             " (pc %p sp %p bp %p T%d)\n",
-             (void*)addr, (void*)pc, (void*)sp, (void*)bp,
-             asanThreadRegistry().GetCurrentTidOrInvalid());
-  AsanPrintf("AddressSanitizer can not provide additional info. ABORTING\n");
-  GET_STACK_TRACE_WITH_PC_AND_BP(kStackTraceMax, pc, bp);
-  stack.PrintStack();
-  ShowStatsAndAbort();
+  ReportSIGSEGV(pc, sp, bp, addr);
 }
 
 void SetAlternateSignalStack() {
@@ -76,7 +70,7 @@ void SetAlternateSignalStack() {
   altstack.ss_flags = 0;
   altstack.ss_size = kAltStackSize;
   CHECK(0 == sigaltstack(&altstack, 0));
-  if (FLAG_v > 0) {
+  if (flags()->verbosity > 0) {
     Report("Alternative stack for T%d set: [%p,%p)\n",
            asanThreadRegistry().GetCurrentTidOrInvalid(),
            altstack.ss_sp, (char*)altstack.ss_sp + altstack.ss_size);
@@ -96,7 +90,7 @@ void InstallSignalHandlers() {
   // Set the alternate signal stack for the main thread.
   // This will cause SetAlternateSignalStack to be called twice, but the stack
   // will be actually set only once.
-  if (FLAG_use_sigaltstack) SetAlternateSignalStack();
+  if (flags()->use_sigaltstack) SetAlternateSignalStack();
   MaybeInstallSigaction(SIGSEGV, ASAN_OnSIGSEGV);
   MaybeInstallSigaction(SIGBUS, ASAN_OnSIGSEGV);
 }
