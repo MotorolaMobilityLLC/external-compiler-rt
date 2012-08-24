@@ -19,6 +19,9 @@
 
 #include "sanitizer_common.h"
 #include "sanitizer_internal_defs.h"
+#include "sanitizer_libc.h"
+#include "sanitizer_list.h"
+#include "sanitizer_mutex.h"
 
 namespace __sanitizer {
 
@@ -76,6 +79,13 @@ class DefaultSizeClassMap {
   }
 };
 
+struct AllocatorListNode {
+  AllocatorListNode *next;
+};
+
+typedef IntrusiveList<AllocatorListNode> AllocatorFreeList;
+
+
 // Space: a portion of address space of kSpaceSize bytes starting at
 // a fixed address (kSpaceBeg). Both constants are powers of two and
 // kSpaceBeg is kSpaceSize-aligned.
@@ -96,30 +106,68 @@ class SizeClassAllocator64 {
     CHECK_EQ(AllocBeg(), reinterpret_cast<uptr>(MmapFixedNoReserve(
              AllocBeg(), AllocSize())));
   }
-  NOINLINE
-  void *Allocate(uptr size) {
-    CHECK_LE(size, SizeClassMap::kMaxSize);
+
+  bool CanAllocate(uptr size, uptr alignment) {
+    return size <= SizeClassMap::kMaxSize &&
+      alignment <= SizeClassMap::kMaxSize;
+  }
+
+  void *Allocate(uptr size, uptr alignment) {
+    CHECK(CanAllocate(size, alignment));
     return AllocateBySizeClass(SizeClassMap::ClassID(size));
   }
-  NOINLINE
+
   void Deallocate(void *p) {
+    CHECK(PointerIsMine(p));
     DeallocateBySizeClass(p, GetSizeClass(p));
   }
-  bool PointerIsMine(void *p) {
+
+  // Allocate several chunks of the given class_id.
+  void BulkAllocate(uptr class_id, AllocatorFreeList *free_list) {
+    CHECK_LT(class_id, kNumClasses);
+    RegionInfo *region = GetRegionInfo(class_id);
+    SpinMutexLock l(&region->mutex);
+    if (region->free_list.empty()) {
+      PopulateFreeList(class_id, region);
+    }
+    CHECK(!region->free_list.empty());
+    // Just take as many chunks as we have in the free list now.
+    // FIXME: this might be too much.
+    free_list->append_front(&region->free_list);
+    CHECK(region->free_list.empty());
+  }
+
+  // Swallow the entire free_list for the given class_id.
+  void BulkDeallocate(uptr class_id, AllocatorFreeList *free_list) {
+    CHECK_LT(class_id, kNumClasses);
+    RegionInfo *region = GetRegionInfo(class_id);
+    SpinMutexLock l(&region->mutex);
+    region->free_list.append_front(free_list);
+  }
+
+  static bool PointerIsMine(void *p) {
     return reinterpret_cast<uptr>(p) / kSpaceSize == kSpaceBeg / kSpaceSize;
   }
-  uptr GetSizeClass(void *p) {
+
+  static uptr GetSizeClass(void *p) {
     return (reinterpret_cast<uptr>(p) / kRegionSize) % kNumClasses;
   }
 
-  uptr GetMetaData(void *p) {
-    uptr class_id = GetSizeClass(p);
-    uptr chunk_idx = GetChunkIdx(reinterpret_cast<uptr>(p), class_id);
-    return kSpaceBeg + (kRegionSize * (class_id + 1)) -
-        (1 + chunk_idx) * kMetadataSize;
+  uptr GetActuallyAllocatedSize(void *p) {
+    CHECK(PointerIsMine(p));
+    return SizeClassMap::Size(GetSizeClass(p));
   }
 
-  uptr TotalMemoryUsedIncludingFreeLists() {
+  uptr ClassID(uptr size) { return SizeClassMap::ClassID(size); }
+
+  void *GetMetaData(void *p) {
+    uptr class_id = GetSizeClass(p);
+    uptr chunk_idx = GetChunkIdx(reinterpret_cast<uptr>(p), class_id);
+    return reinterpret_cast<void*>(kSpaceBeg + (kRegionSize * (class_id + 1)) -
+                                   (1 + chunk_idx) * kMetadataSize);
+  }
+
+  uptr TotalMemoryUsed() {
     uptr res = 0;
     for (uptr i = 0; i < kNumClasses; i++)
       res += GetRegionInfo(i)->allocated_user;
@@ -131,8 +179,14 @@ class SizeClassAllocator64 {
     UnmapOrDie(reinterpret_cast<void*>(AllocBeg()), AllocSize());
   }
 
- private:
+  static uptr AllocBeg()  { return kSpaceBeg  - AdditionalSize(); }
+  static uptr AllocEnd()  { return kSpaceBeg  + kSpaceSize; }
+  static uptr AllocSize() { return kSpaceSize + AdditionalSize(); }
+
   static const uptr kNumClasses = 256;  // Power of two <= 256
+
+ private:
+  COMPILER_CHECK(kSpaceBeg % kSpaceSize == 0);
   COMPILER_CHECK(kNumClasses <= SizeClassMap::kNumClasses);
   static const uptr kRegionSize = kSpaceSize / kNumClasses;
   COMPILER_CHECK((kRegionSize >> 32) > 0);  // kRegionSize must be >= 2^32.
@@ -140,40 +194,25 @@ class SizeClassAllocator64 {
   // or with one element if its size is greater.
   static const uptr kPopulateSize = 1 << 18;
 
-  struct LifoListNode {
-    LifoListNode *next;
-  };
-
   struct RegionInfo {
-    uptr mutex;  // FIXME
-    LifoListNode *free_list;
+    SpinMutex mutex;
+    AllocatorFreeList free_list;
     uptr allocated_user;  // Bytes allocated for user memory.
     uptr allocated_meta;  // Bytes allocated for metadata.
-    char padding[kCacheLineSize -
-                 sizeof(mutex) - sizeof(free_list) -
-                 sizeof(allocated_user) - sizeof(allocated_meta)];
+    char padding[kCacheLineSize - 3 * sizeof(uptr) - sizeof(AllocatorFreeList)];
   };
   COMPILER_CHECK(sizeof(RegionInfo) == kCacheLineSize);
 
-  uptr AdditionalSize() { return sizeof(RegionInfo) * kNumClasses; }
-  uptr AllocBeg()  { return kSpaceBeg  - AdditionalSize(); }
-  uptr AllocSize() { return kSpaceSize + AdditionalSize(); }
+  static uptr AdditionalSize() {
+    uptr res = sizeof(RegionInfo) * kNumClasses;
+    CHECK_EQ(res % kPageSize, 0);
+    return res;
+  }
 
   RegionInfo *GetRegionInfo(uptr class_id) {
     CHECK_LT(class_id, kNumClasses);
     RegionInfo *regions = reinterpret_cast<RegionInfo*>(kSpaceBeg);
     return &regions[-1 - class_id];
-  }
-
-  void PushLifoList(LifoListNode **list, LifoListNode *node) {
-    node->next = *list;
-    *list = node;
-  }
-
-  LifoListNode *PopLifoList(LifoListNode **list) {
-    LifoListNode *res = *list;
-    *list = (*list)->next;
-    return res;
   }
 
   uptr GetChunkIdx(uptr chunk, uptr class_id) {
@@ -184,43 +223,273 @@ class SizeClassAllocator64 {
     return offset / (u32)SizeClassMap::Size(class_id);
   }
 
-  LifoListNode *PopulateFreeList(uptr class_id, RegionInfo *region) {
+  void PopulateFreeList(uptr class_id, RegionInfo *region) {
     uptr size = SizeClassMap::Size(class_id);
     uptr beg_idx = region->allocated_user;
     uptr end_idx = beg_idx + kPopulateSize;
-    LifoListNode *res = 0;
+    region->free_list.clear();
     uptr region_beg = kSpaceBeg + kRegionSize * class_id;
     uptr idx = beg_idx;
     uptr i = 0;
     do {  // do-while loop because we need to put at least one item.
       uptr p = region_beg + idx;
-      PushLifoList(&res, reinterpret_cast<LifoListNode*>(p));
+      region->free_list.push_front(reinterpret_cast<AllocatorListNode*>(p));
       idx += size;
       i++;
     } while (idx < end_idx);
     region->allocated_user += idx - beg_idx;
     region->allocated_meta += i * kMetadataSize;
     CHECK_LT(region->allocated_user + region->allocated_meta, kRegionSize);
-    return res;
   }
 
   void *AllocateBySizeClass(uptr class_id) {
     CHECK_LT(class_id, kNumClasses);
     RegionInfo *region = GetRegionInfo(class_id);
-    // FIXME: Lock region->mutex;
-    if (!region->free_list) {
-      region->free_list = PopulateFreeList(class_id, region);
+    SpinMutexLock l(&region->mutex);
+    if (region->free_list.empty()) {
+      PopulateFreeList(class_id, region);
     }
-    CHECK_NE(region->free_list, 0);
-    LifoListNode *node = PopLifoList(&region->free_list);
+    CHECK(!region->free_list.empty());
+    AllocatorListNode *node = region->free_list.front();
+    region->free_list.pop_front();
     return reinterpret_cast<void*>(node);
   }
 
   void DeallocateBySizeClass(void *p, uptr class_id) {
     RegionInfo *region = GetRegionInfo(class_id);
-    // FIXME: Lock region->mutex;
-    PushLifoList(&region->free_list, reinterpret_cast<LifoListNode*>(p));
+    SpinMutexLock l(&region->mutex);
+    region->free_list.push_front(reinterpret_cast<AllocatorListNode*>(p));
   }
+};
+
+// Objects of this type should be used as local caches for SizeClassAllocator64.
+// Since the typical use of this class is to have one object per thread in TLS,
+// is has to be POD.
+template<const uptr kNumClasses, class SizeClassAllocator>
+struct SizeClassAllocatorLocalCache {
+  // Don't need to call Init if the object is a global (i.e. zero-initialized).
+  void Init() {
+    internal_memset(this, 0, sizeof(*this));
+  }
+
+  void *Allocate(SizeClassAllocator *allocator, uptr class_id) {
+    CHECK_LT(class_id, kNumClasses);
+    AllocatorFreeList *free_list = &free_lists_[class_id];
+    if (free_list->empty())
+      allocator->BulkAllocate(class_id, free_list);
+    CHECK(!free_list->empty());
+    void *res = free_list->front();
+    free_list->pop_front();
+    return res;
+  }
+
+  void Deallocate(SizeClassAllocator *allocator, uptr class_id, void *p) {
+    CHECK_LT(class_id, kNumClasses);
+    free_lists_[class_id].push_front(reinterpret_cast<AllocatorListNode*>(p));
+  }
+
+  void Drain(SizeClassAllocator *allocator) {
+    for (uptr i = 0; i < kNumClasses; i++) {
+      allocator->BulkDeallocate(i, &free_lists_[i]);
+      CHECK(free_lists_[i].empty());
+    }
+  }
+
+  // private:
+  AllocatorFreeList free_lists_[kNumClasses];
+};
+
+// This class can (de)allocate only large chunks of memory using mmap/unmap.
+// The main purpose of this allocator is to cover large and rare allocation
+// sizes not covered by more efficient allocators (e.g. SizeClassAllocator64).
+// The result is always page-aligned.
+class LargeMmapAllocator {
+ public:
+  void Init() {
+    internal_memset(this, 0, sizeof(*this));
+  }
+  void *Allocate(uptr size, uptr alignment) {
+    CHECK_LE(alignment, kPageSize);  // Not implemented. Do we need it?
+    if (size + alignment + 2 * kPageSize < size)
+      return 0;
+    uptr map_size = RoundUpMapSize(size);
+    void *map = MmapOrDie(map_size, "LargeMmapAllocator");
+    void *res = reinterpret_cast<void*>(reinterpret_cast<uptr>(map)
+                                        + kPageSize);
+    Header *h = GetHeader(res);
+    h->size = size;
+    {
+      SpinMutexLock l(&mutex_);
+      h->next = list_;
+      h->prev = 0;
+      if (list_)
+        list_->prev = h;
+      list_ = h;
+    }
+    return res;
+  }
+
+  void Deallocate(void *p) {
+    Header *h = GetHeader(p);
+    uptr map_size = RoundUpMapSize(h->size);
+    {
+      SpinMutexLock l(&mutex_);
+      Header *prev = h->prev;
+      Header *next = h->next;
+      if (prev)
+        prev->next = next;
+      if (next)
+        next->prev = prev;
+      if (h == list_)
+        list_ = next;
+    }
+    UnmapOrDie(h, map_size);
+  }
+
+  uptr TotalMemoryUsed() {
+    SpinMutexLock l(&mutex_);
+    uptr res = 0;
+    for (Header *l = list_; l; l = l->next) {
+      res += RoundUpMapSize(l->size);
+    }
+    return res;
+  }
+
+  bool PointerIsMine(void *p) {
+    // Fast check.
+    if ((reinterpret_cast<uptr>(p) % kPageSize) != 0) return false;
+    SpinMutexLock l(&mutex_);
+    for (Header *l = list_; l; l = l->next) {
+      if (GetUser(l) == p) return true;
+    }
+    return false;
+  }
+
+  uptr GetActuallyAllocatedSize(void *p) {
+    return RoundUpMapSize(GetHeader(p)->size) - kPageSize;
+  }
+
+  // At least kPageSize/2 metadata bytes is available.
+  void *GetMetaData(void *p) {
+    return GetHeader(p) + 1;
+  }
+
+ private:
+  struct Header {
+    uptr size;
+    Header *next;
+    Header *prev;
+  };
+
+  Header *GetHeader(void *p) {
+    return reinterpret_cast<Header*>(reinterpret_cast<uptr>(p) - kPageSize);
+  }
+
+  void *GetUser(Header *h) {
+    return reinterpret_cast<void*>(reinterpret_cast<uptr>(h) + kPageSize);
+  }
+
+  uptr RoundUpMapSize(uptr size) {
+    return RoundUpTo(size, kPageSize) + kPageSize;
+  }
+
+  Header *list_;
+  SpinMutex mutex_;
+};
+
+// This class implements a complete memory allocator by using two
+// internal allocators:
+// PrimaryAllocator is efficient, but may not allocate some sizes (alignments).
+//  When allocating 2^x bytes it should return 2^x aligned chunk.
+// PrimaryAllocator is used via a local AllocatorCache.
+// SecondaryAllocator can allocate anything, but is not efficient.
+template <class PrimaryAllocator, class AllocatorCache,
+          class SecondaryAllocator>  // NOLINT
+class CombinedAllocator {
+ public:
+  void Init() {
+    primary_.Init();
+    secondary_.Init();
+  }
+
+  void *Allocate(AllocatorCache *cache, uptr size, uptr alignment,
+                 bool cleared = false) {
+    // Returning 0 on malloc(0) may break a lot of code.
+    if (size == 0)
+      size = 1;
+    if (size + alignment < size)
+      return 0;
+    if (alignment > 8)
+      size = RoundUpTo(size, alignment);
+    void *res;
+    if (primary_.CanAllocate(size, alignment))
+      res = cache->Allocate(&primary_, primary_.ClassID(size));
+    else
+      res = secondary_.Allocate(size, alignment);
+    if (alignment > 8)
+      CHECK_EQ(reinterpret_cast<uptr>(res) & (alignment - 1), 0);
+    if (cleared && res)
+      internal_memset(res, 0, size);
+    return res;
+  }
+
+  void Deallocate(AllocatorCache *cache, void *p) {
+    if (!p) return;
+    if (primary_.PointerIsMine(p))
+      cache->Deallocate(&primary_, primary_.GetSizeClass(p), p);
+    else
+      secondary_.Deallocate(p);
+  }
+
+  void *Reallocate(AllocatorCache *cache, void *p, uptr new_size,
+                   uptr alignment) {
+    if (!p)
+      return Allocate(cache, new_size, alignment);
+    if (!new_size) {
+      Deallocate(cache, p);
+      return 0;
+    }
+    CHECK(PointerIsMine(p));
+    uptr old_size = GetActuallyAllocatedSize(p);
+    uptr memcpy_size = Min(new_size, old_size);
+    void *new_p = Allocate(cache, new_size, alignment);
+    if (new_p)
+      internal_memcpy(new_p, p, memcpy_size);
+    Deallocate(cache, p);
+    return new_p;
+  }
+
+  bool PointerIsMine(void *p) {
+    if (primary_.PointerIsMine(p))
+      return true;
+    return secondary_.PointerIsMine(p);
+  }
+
+  void *GetMetaData(void *p) {
+    if (primary_.PointerIsMine(p))
+      return primary_.GetMetaData(p);
+    return secondary_.GetMetaData(p);
+  }
+
+  uptr GetActuallyAllocatedSize(void *p) {
+    if (primary_.PointerIsMine(p))
+      return primary_.GetActuallyAllocatedSize(p);
+    return secondary_.GetActuallyAllocatedSize(p);
+  }
+
+  uptr TotalMemoryUsed() {
+    return primary_.TotalMemoryUsed() + secondary_.TotalMemoryUsed();
+  }
+
+  void TestOnlyUnmap() { primary_.TestOnlyUnmap(); }
+
+  void SwallowCache(AllocatorCache *cache) {
+    cache->Drain(&primary_);
+  }
+
+ private:
+  PrimaryAllocator primary_;
+  SecondaryAllocator secondary_;
 };
 
 }  // namespace __sanitizer

@@ -17,13 +17,14 @@
 
 namespace __tsan {
 
-// Descriptor of user's memory block.
-struct MBlock {
-  uptr size;
-};
+const uptr kDefaultAlignment = 16;
+
+void InitializeAllocator();
+void AlloctorThreadFinish(ThreadState *thr);
 
 // For user allocations.
-void *user_alloc(ThreadState *thr, uptr pc, uptr sz);
+void *user_alloc(ThreadState *thr, uptr pc, uptr sz,
+                 uptr align = kDefaultAlignment);
 // Does not accept NULL.
 void user_free(ThreadState *thr, uptr pc, void *p);
 void *user_realloc(ThreadState *thr, uptr pc, void *p, uptr sz);
@@ -36,6 +37,7 @@ enum MBlockType {
   MBlockScopedBuf,
   MBlockString,
   MBlockStackTrace,
+  MBlockShadowStack,
   MBlockSync,
   MBlockClock,
   MBlockThreadContex,
@@ -52,6 +54,7 @@ enum MBlockType {
   MBlockReportStack,
   MBlockSuppression,
   MBlockExpectRace,
+  MBlockSignal,
 
   // This must be the last.
   MBlockTypeCount,

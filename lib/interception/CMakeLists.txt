@@ -13,22 +13,34 @@ if (APPLE)
   list(APPEND INTERCEPTION_SOURCES mach_override/mach_override.c)
 endif ()
 
-set(INTERCEPTION_CFLAGS "-fvisibility=hidden")
-
-set(INTERCEPTION_COMMON_DEFINITIONS
-	INTERCEPTION_HAS_EXCEPTIONS=1)
-
-if(CAN_TARGET_X86_64)
-  add_library(RTInterception.x86_64 OBJECT ${INTERCEPTION_SOURCES})
-  set_property(TARGET RTInterception.x86_64 PROPERTY COMPILE_FLAGS
-		"${INTERCEPTION_CFLAGS} ${TARGET_X86_64_CFLAGS}")
-  set_property(TARGET RTInterception.x86_64 APPEND PROPERTY COMPILE_DEFINITIONS
-		${INTERCEPTION_COMMON_DEFINITIONS})
+set(INTERCEPTION_CFLAGS
+  -O3
+  -fPIC
+  -fno-exceptions
+  -funwind-tables
+  -fvisibility=hidden
+  )
+if(SUPPORTS_NO_VARIADIC_MACROS_FLAG)
+  list(APPEND INTERCEPTION_CFLAGS -Wno-variadic-macros)
 endif()
-if(CAN_TARGET_I386)
-  add_library(RTInterception.i386 OBJECT ${INTERCEPTION_SOURCES})
-  set_property(TARGET RTInterception.i386 PROPERTY COMPILE_FLAGS
-		"${INTERCEPTION_CFLAGS} ${TARGET_I386_CFLAGS}")
-  set_property(TARGET RTInterception.i386 APPEND PROPERTY COMPILE_DEFINITIONS
-		${INTERCEPTION_COMMON_DEFINITIONS})
+
+if(APPLE)
+  # Build universal binary on APPLE.
+  add_library(RTInterception.osx OBJECT ${INTERCEPTION_SOURCES})
+  set_target_compile_flags(RTInterception.osx ${INTERCEPTION_CFLAGS})
+  filter_available_targets(INTERCEPTION_TARGETS x86_64 i386)
+  set_target_properties(RTInterception.osx PROPERTIES
+    OSX_ARCHITECTURES "${INTERCEPTION_TARGETS}")
+else()
+  # Otherwise, build separate libraries for each target.
+  if(CAN_TARGET_X86_64)
+    add_library(RTInterception.x86_64 OBJECT ${INTERCEPTION_SOURCES})
+    set_target_compile_flags(RTInterception.x86_64
+      ${INTERCEPTION_CFLAGS} ${TARGET_X86_64_CFLAGS})
+  endif()
+  if(CAN_TARGET_I386)
+    add_library(RTInterception.i386 OBJECT ${INTERCEPTION_SOURCES})
+    set_target_compile_flags(RTInterception.i386
+      ${INTERCEPTION_CFLAGS} ${TARGET_I386_CFLAGS})
+  endif()
 endif()
