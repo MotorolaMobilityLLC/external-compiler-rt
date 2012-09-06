@@ -48,7 +48,34 @@ bool MemoryRangeIsAvailable(uptr range_start, uptr range_end);
 
 // Internal allocator
 void *InternalAlloc(uptr size);
-void InternalFree(void *addr);
+void InternalFree(void *p);
+// Given the pointer p into a valid allocated block,
+// returns a pointer to the beginning of the block.
+void *InternalAllocBlock(void *p);
+
+// InternalScopedBuffer can be used instead of large stack arrays to
+// keep frame size low.
+template<typename T>
+class InternalScopedBuffer {
+ public:
+  explicit InternalScopedBuffer(uptr cnt) {
+    cnt_ = cnt;
+    ptr_ = (T*)InternalAlloc(cnt * sizeof(T));
+  }
+  ~InternalScopedBuffer() {
+    InternalFree(ptr_);
+  }
+  T &operator[](uptr i) { return ptr_[i]; }
+  T *data() { return ptr_; }
+  uptr size() { return cnt_ * sizeof(T); }
+
+ private:
+  T *ptr_;
+  uptr cnt_;
+  // Disallow evil constructors.
+  InternalScopedBuffer(const InternalScopedBuffer&);
+  void operator=(const InternalScopedBuffer&);
+};
 
 // IO
 void RawWrite(const char *buffer);
@@ -61,6 +88,11 @@ void Report(const char *format, ...);
 // Returns the number of read bytes or 0 if file can not be opened.
 uptr ReadFileToBuffer(const char *file_name, char **buff,
                       uptr *buff_size, uptr max_len);
+// Maps given file to virtual memory, and returns pointer to it
+// (or NULL if the mapping failes). Stores the size of mmaped region
+// in '*buff_size'.
+void *MapFileToMemory(const char *file_name, uptr *buff_size);
+
 const char *GetEnv(const char *name);
 const char *GetPwd();
 
@@ -74,32 +106,33 @@ void NORETURN Abort();
 int Atexit(void (*function)(void));
 void SortArray(uptr *array, uptr size);
 
-// Atomics
-int AtomicInc(int *a);
-u16 AtomicExchange(u16 *a, u16 new_val);
-u8 AtomicExchange(u8 *a, u8 new_val);
-
 // Math
-inline bool IsPowerOfTwo(uptr x) {
+INLINE bool IsPowerOfTwo(uptr x) {
   return (x & (x - 1)) == 0;
 }
-inline uptr RoundUpTo(uptr size, uptr boundary) {
+INLINE uptr RoundUpTo(uptr size, uptr boundary) {
   CHECK(IsPowerOfTwo(boundary));
   return (size + boundary - 1) & ~(boundary - 1);
 }
-// Don't use std::min and std::max, to minimize dependency on libstdc++.
+// Don't use std::min, std::max or std::swap, to minimize dependency
+// on libstdc++.
 template<class T> T Min(T a, T b) { return a < b ? a : b; }
 template<class T> T Max(T a, T b) { return a > b ? a : b; }
+template<class T> void Swap(T& a, T& b) {
+  T tmp = a;
+  a = b;
+  b = tmp;
+}
 
 // Char handling
-inline bool IsSpace(int c) {
+INLINE bool IsSpace(int c) {
   return (c == ' ') || (c == '\n') || (c == '\t') ||
          (c == '\f') || (c == '\r') || (c == '\v');
 }
-inline bool IsDigit(int c) {
+INLINE bool IsDigit(int c) {
   return (c >= '0') && (c <= '9');
 }
-inline int ToLower(int c) {
+INLINE int ToLower(int c) {
   return (c >= 'A' && c <= 'Z') ? (c + 'a' - 'A') : c;
 }
 

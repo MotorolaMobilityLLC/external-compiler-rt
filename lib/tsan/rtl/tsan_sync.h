@@ -13,7 +13,8 @@
 #ifndef TSAN_SYNC_H
 #define TSAN_SYNC_H
 
-#include "tsan_atomic.h"
+#include "sanitizer_common/sanitizer_atomic.h"
+#include "sanitizer_common/sanitizer_common.h"
 #include "tsan_clock.h"
 #include "tsan_defs.h"
 #include "tsan_mutex.h"
@@ -59,10 +60,12 @@ struct SyncVar {
   SyncClock read_clock;  // Used for rw mutexes only.
   StackTrace creation_stack;
   int owner_tid;  // Set only by exclusive owners.
+  u64 last_lock;
   int recursion;
   bool is_rw;
   bool is_recursive;
   bool is_broken;
+  bool is_linker_init;
   SyncVar *next;  // In SyncTab hashtable.
 
   uptr GetMemoryConsumption();
