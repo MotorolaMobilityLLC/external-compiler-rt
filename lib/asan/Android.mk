@@ -35,6 +35,7 @@ asan_rtl_files := \
 	asan_poisoning.cc	\
 	asan_posix.cc \
 	asan_printf.cc	\
+	asan_report.cc	\
 	asan_stack.cc	\
 	asan_stats.cc	\
 	asan_thread.cc	\
@@ -42,11 +43,14 @@ asan_rtl_files := \
 	../interception/interception_linux.cc \
 	../sanitizer_common/sanitizer_allocator.cc \
 	../sanitizer_common/sanitizer_common.cc \
+	../sanitizer_common/sanitizer_flags.cc \
 	../sanitizer_common/sanitizer_libc.cc \
 	../sanitizer_common/sanitizer_linux.cc \
 	../sanitizer_common/sanitizer_posix.cc \
 	../sanitizer_common/sanitizer_printf.cc \
-	../sanitizer_common/sanitizer_symbolizer.cc
+	../sanitizer_common/sanitizer_symbolizer.cc \
+	../sanitizer_common/sanitizer_symbolizer_linux.cc \
+	../sanitizer_common/sanitizer_symbolizer_llvm.cc \
 
 asan_rtl_cflags := \
 	-fvisibility=hidden \
@@ -63,8 +67,7 @@ asan_rtl_cflags := \
 asan_test_files := \
 	tests/asan_test.cc \
 	tests/asan_globals_test.cc \
-	tests/asan_break_optimization.cc \
-	tests/asan_interface_test.cc
+	tests/asan_break_optimization.cc
 
 asan_test_cflags := \
 	-mllvm -asan-blacklist=external/compiler-rt/lib/asan/tests/asan_test.ignore \
