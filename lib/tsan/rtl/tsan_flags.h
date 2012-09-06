@@ -33,6 +33,8 @@ struct Flags {
   bool suppress_equal_addresses;
   // Report thread leaks at exit?
   bool report_thread_leaks;
+  // Report destruction of a locked mutex?
+  bool report_destroy_locked;
   // Report violations of async signal-safety
   // (e.g. malloc() call from a signal handler).
   bool report_signal_unsafe;
@@ -60,6 +62,8 @@ struct Flags {
   bool stop_on_start;
   // Controls whether RunningOnValgrind() returns true or false.
   bool running_on_valgrind;
+  // If set, uses in-process symbolizer from common sanitizer runtime.
+  bool use_internal_symbolizer;
 };
 
 Flags *flags();

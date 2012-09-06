@@ -27,6 +27,8 @@ ReportDesc::ReportDesc()
 ReportDesc::~ReportDesc() {
 }
 
+#ifndef TSAN_GO
+
 static void PrintHeader(ReportType typ) {
   TsanPrintf("WARNING: ThreadSanitizer: ");
 
@@ -40,6 +42,8 @@ static void PrintHeader(ReportType typ) {
     TsanPrintf("destroy of a locked mutex");
   else if (typ == ReportTypeSignalUnsafe)
     TsanPrintf("signal-unsafe call inside of a signal");
+  else if (typ == ReportTypeErrnoInSignal)
+    TsanPrintf("signal handler spoils errno");
 
   TsanPrintf(" (pid=%d)\n", GetPid());
 }
@@ -105,8 +109,11 @@ void PrintReport(const ReportDesc *rep) {
   TsanPrintf("==================\n");
   PrintHeader(rep->typ);
 
-  for (uptr i = 0; i < rep->stacks.Size(); i++)
+  for (uptr i = 0; i < rep->stacks.Size(); i++) {
+    if (i)
+      TsanPrintf("  and:\n");
     PrintStack(rep->stacks[i]);
+  }
 
   for (uptr i = 0; i < rep->mops.Size(); i++)
     PrintMop(rep->mops[i], i == 0);
@@ -122,5 +129,43 @@ void PrintReport(const ReportDesc *rep) {
 
   TsanPrintf("==================\n");
 }
+
+#else
+
+static void PrintStack(const ReportStack *ent) {
+  for (int i = 0; ent; ent = ent->next, i++) {
+    TsanPrintf("  %s()\n      %s:%d +0x%zx\n",
+        ent->func, ent->file, ent->line, (void*)ent->offset);
+  }
+  TsanPrintf("\n");
+}
+
+static void PrintMop(const ReportMop *mop, bool first) {
+  TsanPrintf("%s by goroutine %d:\n",
+      (first ? (mop->write ? "Write" : "Read")
+             : (mop->write ? "Previous write" : "Previous read")),
+      mop->tid);
+  PrintStack(mop->stack);
+}
+
+static void PrintThread(const ReportThread *rt) {
+  if (rt->id == 0)  // Little sense in describing the main thread.
+    return;
+  TsanPrintf("Goroutine %d (%s) created at:\n",
+    rt->id, rt->running ? "running" : "finished");
+  PrintStack(rt->stack);
+}
+
+void PrintReport(const ReportDesc *rep) {
+  TsanPrintf("==================\n");
+  TsanPrintf("WARNING: DATA RACE\n");
+  for (uptr i = 0; i < rep->mops.Size(); i++)
+    PrintMop(rep->mops[i], i == 0);
+  for (uptr i = 0; i < rep->threads.Size(); i++)
+    PrintThread(rep->threads[i]);
+  TsanPrintf("==================\n");
+}
+
+#endif
 
 }  // namespace __tsan

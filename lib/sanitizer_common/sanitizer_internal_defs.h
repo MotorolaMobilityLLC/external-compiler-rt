@@ -26,6 +26,7 @@ using namespace __sanitizer;  // NOLINT
 // Platform-specific defs.
 #if defined(_WIN32)
 typedef unsigned long    DWORD;  // NOLINT
+# define ALWAYS_INLINE __declspec(forceinline)
 // FIXME(timurrrr): do we need this on Windows?
 # define ALIAS(x)
 # define ALIGNED(x) __declspec(align(x))
@@ -33,18 +34,24 @@ typedef unsigned long    DWORD;  // NOLINT
 # define NOINLINE __declspec(noinline)
 # define NORETURN __declspec(noreturn)
 # define THREADLOCAL   __declspec(thread)
+# define NOTHROW
 #else  // _WIN32
+# define ALWAYS_INLINE __attribute__((always_inline))
 # define ALIAS(x) __attribute__((alias(x)))
 # define ALIGNED(x) __attribute__((aligned(x)))
 # define FORMAT(f, a)  __attribute__((format(printf, f, a)))
 # define NOINLINE __attribute__((noinline))
 # define NORETURN  __attribute__((noreturn))
 # define THREADLOCAL   __thread
+# ifdef __cplusplus
+#   define NOTHROW throw()
+# else
+#   define NOTHROW __attribute__((__nothrow__))
+#endif
 #endif  // _WIN32
 
 // We have no equivalent of these on Windows.
 #ifndef _WIN32
-# define ALWAYS_INLINE __attribute__((always_inline))
 # define LIKELY(x)     __builtin_expect(!!(x), 1)
 # define UNLIKELY(x)   __builtin_expect(!!(x), 0)
 # define UNUSED __attribute__((unused))
@@ -104,6 +111,24 @@ void NORETURN CheckFailed(const char *file, int line, const char *cond,
 #define CHECK_LE(a, b) CHECK_IMPL((a), <=, (b))
 #define CHECK_GT(a, b) CHECK_IMPL((a), >,  (b))
 #define CHECK_GE(a, b) CHECK_IMPL((a), >=, (b))
+
+#if TSAN_DEBUG
+#define DCHECK(a)       CHECK(a)
+#define DCHECK_EQ(a, b) CHECK_EQ(a, b)
+#define DCHECK_NE(a, b) CHECK_NE(a, b)
+#define DCHECK_LT(a, b) CHECK_LT(a, b)
+#define DCHECK_LE(a, b) CHECK_LE(a, b)
+#define DCHECK_GT(a, b) CHECK_GT(a, b)
+#define DCHECK_GE(a, b) CHECK_GE(a, b)
+#else
+#define DCHECK(a)
+#define DCHECK_EQ(a, b)
+#define DCHECK_NE(a, b)
+#define DCHECK_LT(a, b)
+#define DCHECK_LE(a, b)
+#define DCHECK_GT(a, b)
+#define DCHECK_GE(a, b)
+#endif
 
 #define UNIMPLEMENTED() CHECK("unimplemented" && 0)
 

@@ -37,7 +37,8 @@ extern "C" {
     uptr beg;                // The address of the global.
     uptr size;               // The original size of the global.
     uptr size_with_redzone;  // The size with the redzone.
-    const char *name;          // Name as a C string.
+    const char *name;        // Name as a C string.
+    uptr has_dynamic_init;   // Non-zero if the global has dynamic initializer.
   };
 
   // These two functions should be called by the instrumented code.
@@ -45,6 +46,14 @@ extern "C" {
   void __asan_register_globals(__asan_global *globals, uptr n)
       SANITIZER_INTERFACE_ATTRIBUTE;
   void __asan_unregister_globals(__asan_global *globals, uptr n)
+      SANITIZER_INTERFACE_ATTRIBUTE;
+
+  // These two functions should be called before and after dynamic initializers
+  // run, respectively.  They should be called with parameters describing all
+  // dynamically initialized globals defined in the calling TU.
+  void __asan_before_dynamic_init(uptr first_addr, uptr last_addr)
+      SANITIZER_INTERFACE_ATTRIBUTE;
+  void __asan_after_dynamic_init()
       SANITIZER_INTERFACE_ATTRIBUTE;
 
   // These two functions are used by the instrumented code in the
@@ -118,6 +127,13 @@ extern "C" {
   void __asan_set_error_report_callback(void (*callback)(const char*))
       SANITIZER_INTERFACE_ATTRIBUTE;
 
+  // Sets the callback to be called right when ASan detects an error.
+  // This can be used to notice cases when ASan detects an error, but the
+  // program crashes before ASan report is printed.
+  // Passing 0 unsets the callback.
+  void __asan_set_on_error_callback(void (*callback)(void))
+      SANITIZER_INTERFACE_ATTRIBUTE;
+
   // Returns the estimated number of bytes that will be reserved by allocator
   // for request of "size" bytes. If ASan allocator can't allocate that much
   // memory, returns the maximal possible allocation size, otherwise returns
@@ -154,10 +170,11 @@ extern "C" {
   // Prints accumulated stats to stderr. Used for debugging.
   void __asan_print_accumulated_stats()
       SANITIZER_INTERFACE_ATTRIBUTE;
-#if !defined(_WIN32)
-  // We do not need to redefine the defaults right now on Windows.
-  char *__asan_default_options SANITIZER_WEAK_ATTRIBUTE;
-#endif
-}  // namespace
+
+  // This function may be overriden by user to provide a string containing
+  // ASan runtime options. See asan_flags.h for details.
+  const char* __asan_default_options()
+      SANITIZER_WEAK_ATTRIBUTE SANITIZER_INTERFACE_ATTRIBUTE;
+}  // extern "C"
 
 #endif  // ASAN_INTERFACE_H
