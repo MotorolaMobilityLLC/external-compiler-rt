@@ -12,7 +12,6 @@
 // Handle globals.
 //===----------------------------------------------------------------------===//
 #include "asan_interceptors.h"
-#include "asan_interface.h"
 #include "asan_internal.h"
 #include "asan_lock.h"
 #include "asan_mapping.h"
@@ -20,6 +19,7 @@
 #include "asan_stack.h"
 #include "asan_stats.h"
 #include "asan_thread.h"
+#include "sanitizer/asan_interface.h"
 
 namespace __asan {
 
@@ -31,7 +31,7 @@ struct ListOfGlobals {
 };
 
 static AsanLock mu_for_globals(LINKER_INITIALIZED);
-static LowLevelAllocator allocator_for_globals(LINKER_INITIALIZED);
+static LowLevelAllocator allocator_for_globals;
 static ListOfGlobals *list_of_all_globals;
 static ListOfGlobals *list_of_dynamic_init_globals;
 
