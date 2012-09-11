@@ -48,6 +48,20 @@ try_compile(CAN_TARGET_I386 ${CMAKE_BINARY_DIR} ${SIMPLE_SOURCE32}
             COMPILE_DEFINITIONS "${TARGET_I386_CFLAGS}"
             CMAKE_FLAGS "-DCMAKE_EXE_LINKER_FLAGS:STRING=${TARGET_I386_CFLAGS}")
 
+if(LLVM_ANDROID_TOOLCHAIN_DIR)
+  if(EXISTS ${LLVM_ANDROID_TOOLCHAIN_DIR}/arm-linux-androideabi)
+    set(CAN_TARGET_ARM_ANDROID 1)
+    set(TARGET_ARM_ANDROID_CFLAGS
+      -target arm-linux-androideabi
+      --sysroot=${LLVM_ANDROID_TOOLCHAIN_DIR}/sysroot
+      -B${LLVM_ANDROID_TOOLCHAIN_DIR}
+      )
+  else()
+    set(CAN_TARGET_ARM_ANDROID 0)
+  endif()
+  # TODO: support i686 and MIPS Android toolchains
+endif()
+
 function(filter_available_targets out_var)
   set(archs)
   foreach(arch ${ARGN})
@@ -60,6 +74,28 @@ function(filter_available_targets out_var)
   set(${out_var} ${archs} PARENT_SCOPE)
 endfunction()
 
+# Provide some common commmandline flags for Sanitizer runtimes.
+set(SANITIZER_COMMON_CFLAGS
+  -fPIC
+  -fno-builtin
+  -fno-exceptions
+  -fomit-frame-pointer
+  -funwind-tables
+  -fvisibility=hidden
+  -O3
+  )
+if(SUPPORTS_NO_VARIADIC_MACROS_FLAG)
+  list(APPEND SANITIZER_COMMON_CFLAGS -Wno-variadic-macros)
+endif()
+check_cxx_compiler_flag(-Wno-c99-extensions
+  SUPPORTS_NO_C99_EXTENSIONS_FLAG)
+if(SUPPORTS_NO_C99_EXTENSIONS_FLAG)
+  list(APPEND SANITIZER_COMMON_CFLAGS -Wno-c99-extensions)
+endif()
+if(APPLE)
+  list(APPEND SANITIZER_COMMON_CFLAGS -mmacosx-version-min=10.5)
+endif()
+
 # Because compiler-rt spends a lot of time setting up custom compile flags,
 # define a handy helper function for it. The compile flags setting in CMake
 # has serious issues that make its syntax challenging at best.
@@ -69,6 +105,12 @@ function(set_target_compile_flags target)
   endforeach()
   set_property(TARGET ${target} PROPERTY COMPILE_FLAGS "${argstring}")
 endfunction()
+
+# Add the public header's directory to the includes for all of compiler-rt.
+include_directories(include)
+
+# Build utils before building compiler-rt library.
+add_subdirectory(utils)
 
 add_subdirectory(lib)
 

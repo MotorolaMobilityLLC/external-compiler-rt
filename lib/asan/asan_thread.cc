@@ -26,24 +26,17 @@ AsanThread::AsanThread(LinkerInitialized x)
       malloc_storage_(x),
       stats_(x) { }
 
-static AsanLock mu_for_thread_summary(LINKER_INITIALIZED);
-static LowLevelAllocator allocator_for_thread_summary(LINKER_INITIALIZED);
-
 AsanThread *AsanThread::Create(u32 parent_tid, thread_callback_t start_routine,
-                               void *arg, AsanStackTrace *stack) {
+                               void *arg, StackTrace *stack) {
   uptr size = RoundUpTo(sizeof(AsanThread), kPageSize);
   AsanThread *thread = (AsanThread*)MmapOrDie(size, __FUNCTION__);
   thread->start_routine_ = start_routine;
   thread->arg_ = arg;
 
-  const uptr kSummaryAllocSize = 1024;
+  const uptr kSummaryAllocSize = kPageSize;
   CHECK_LE(sizeof(AsanThreadSummary), kSummaryAllocSize);
-  AsanThreadSummary *summary;
-  {
-    ScopedLock lock(&mu_for_thread_summary);
-    summary = (AsanThreadSummary*)
-        allocator_for_thread_summary.Allocate(kSummaryAllocSize);
-  }
+  AsanThreadSummary *summary =
+      (AsanThreadSummary*)MmapOrDie(kPageSize, "AsanThreadSummary");
   summary->Init(parent_tid, stack);
   summary->set_thread(thread);
   thread->set_summary(summary);

@@ -13,16 +13,7 @@ if (APPLE)
   list(APPEND INTERCEPTION_SOURCES mach_override/mach_override.c)
 endif ()
 
-set(INTERCEPTION_CFLAGS
-  -O3
-  -fPIC
-  -fno-exceptions
-  -funwind-tables
-  -fvisibility=hidden
-  )
-if(SUPPORTS_NO_VARIADIC_MACROS_FLAG)
-  list(APPEND INTERCEPTION_CFLAGS -Wno-variadic-macros)
-endif()
+set(INTERCEPTION_CFLAGS ${SANITIZER_COMMON_CFLAGS})
 
 if(APPLE)
   # Build universal binary on APPLE.
@@ -42,5 +33,10 @@ else()
     add_library(RTInterception.i386 OBJECT ${INTERCEPTION_SOURCES})
     set_target_compile_flags(RTInterception.i386
       ${INTERCEPTION_CFLAGS} ${TARGET_I386_CFLAGS})
+  endif()
+  if(CAN_TARGET_ARM_ANDROID)
+    add_library(RTInterception.arm.android OBJECT ${INTERCEPTION_SOURCES})
+    set_target_compile_flags(RTInterception.arm.android
+      ${INTERCEPTION_CFLAGS} ${TARGET_ARM_ANDROID_CFLAGS})
   endif()
 endif()
