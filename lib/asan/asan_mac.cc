@@ -23,7 +23,8 @@
 #include "asan_thread_registry.h"
 #include "sanitizer_common/sanitizer_libc.h"
 
-#include <crt_externs.h>  // for _NSGetEnviron
+#include <crt_externs.h>  // for _NSGetArgv
+#include <dlfcn.h>  // for dladdr()
 #include <mach-o/dyld.h>
 #include <mach-o/loader.h>
 #include <sys/mman.h>
@@ -83,6 +84,42 @@ bool PlatformHasDifferentMemcpyAndMemmove() {
   return GetMacosVersion() == MACOS_VERSION_SNOW_LEOPARD;
 }
 
+extern "C"
+void __asan_init();
+
+static const char kDyldInsertLibraries[] = "DYLD_INSERT_LIBRARIES";
+
+void MaybeReexec() {
+  if (!flags()->allow_reexec) return;
+#if MAC_INTERPOSE_FUNCTIONS
+  // If the program is linked with the dynamic ASan runtime library, make sure
+  // the library is preloaded so that the wrappers work. If it is not, set
+  // DYLD_INSERT_LIBRARIES and re-exec ourselves.
+  Dl_info info;
+  CHECK(dladdr((void*)__asan_init, &info));
+  const char *dyld_insert_libraries = GetEnv(kDyldInsertLibraries);
+  if (!dyld_insert_libraries ||
+      !REAL(strstr)(dyld_insert_libraries, info.dli_fname)) {
+    // DYLD_INSERT_LIBRARIES is not set or does not contain the runtime
+    // library.
+    char program_name[1024];
+    uint32_t buf_size = sizeof(program_name);
+    _NSGetExecutablePath(program_name, &buf_size);
+    // Ok to use setenv() since the wrappers don't depend on the value of
+    // asan_inited.
+    setenv(kDyldInsertLibraries, info.dli_fname, /*overwrite*/0);
+    if (flags()->verbosity >= 1) {
+      Report("exec()-ing the program with\n");
+      Report("%s=%s\n", kDyldInsertLibraries, info.dli_fname);
+      Report("to enable ASan wrappers.\n");
+      Report("Set ASAN_OPTIONS=allow_reexec=0 to disable this.\n");
+    }
+    execv(program_name, *_NSGetArgv());
+  }
+#endif  // MAC_INTERPOSE_FUNCTIONS
+  // If we're not using the dynamic runtime, do nothing.
+}
+
 // No-op. Mac does not support static linkage anyway.
 void *AsanDoesNotSupportStaticLinkage() {
   return 0;
@@ -115,12 +152,14 @@ void AsanLock::Unlock() {
   OSSpinLockUnlock((OSSpinLock*)&opaque_storage_);
 }
 
-void AsanStackTrace::GetStackTrace(uptr max_s, uptr pc, uptr bp) {
-  size = 0;
-  trace[0] = pc;
+void GetStackTrace(StackTrace *stack, uptr max_s, uptr pc, uptr bp) {
+  stack->size = 0;
+  stack->trace[0] = pc;
   if ((max_s) > 1) {
-    max_size = max_s;
-    FastUnwindStack(pc, bp);
+    stack->max_size = max_s;
+    if (!asan_inited) return;
+    if (AsanThread *t = asanThreadRegistry().GetCurrent())
+      stack->FastUnwindStack(pc, bp, t->stack_top(), t->stack_bottom());
   }
 }
 
@@ -209,6 +248,7 @@ typedef void* pthread_workitem_handle_t;
 
 typedef void* dispatch_group_t;
 typedef void* dispatch_queue_t;
+typedef void* dispatch_source_t;
 typedef u64 dispatch_time_t;
 typedef void (*dispatch_function_t)(void *block);
 typedef void* (*worker_t)(void *block);
@@ -241,6 +281,17 @@ int pthread_workqueue_additem_np(pthread_workqueue_t workq,
     pthread_workitem_handle_t * itemhandlep, unsigned int *gencountp);
 }  // extern "C"
 
+static ALWAYS_INLINE
+void asan_register_worker_thread(int parent_tid, StackTrace *stack) {
+  AsanThread *t = asanThreadRegistry().GetCurrent();
+  if (!t) {
+    t = AsanThread::Create(parent_tid, 0, 0, stack);
+    asanThreadRegistry().RegisterThread(t);
+    t->Init();
+    asanThreadRegistry().SetCurrent(t);
+  }
+}
+
 // For use by only those functions that allocated the context via
 // alloc_asan_context().
 extern "C"
@@ -252,13 +303,7 @@ void asan_dispatch_call_block_and_release(void *block) {
            "context: %p, pthread_self: %p\n",
            block, pthread_self());
   }
-  AsanThread *t = asanThreadRegistry().GetCurrent();
-  if (!t) {
-    t = AsanThread::Create(context->parent_tid, 0, 0, &stack);
-    asanThreadRegistry().RegisterThread(t);
-    t->Init();
-    asanThreadRegistry().SetCurrent(t);
-  }
+  asan_register_worker_thread(context->parent_tid, &stack);
   // Call the original dispatcher for the block.
   context->func(context->block);
   asan_free(context, &stack);
@@ -272,7 +317,7 @@ using namespace __asan;  // NOLINT
 // The caller retains control of the allocated context.
 extern "C"
 asan_block_context_t *alloc_asan_context(void *ctxt, dispatch_function_t func,
-                                         AsanStackTrace *stack) {
+                                         StackTrace *stack) {
   asan_block_context_t *asan_ctxt =
       (asan_block_context_t*) asan_malloc(sizeof(asan_block_context_t), stack);
   asan_ctxt->block = ctxt;
@@ -314,66 +359,6 @@ INTERCEPTOR(void, dispatch_after_f, dispatch_time_t when,
                                 asan_dispatch_call_block_and_release);
 }
 
-#if MAC_INTERPOSE_FUNCTIONS
-// dispatch_async and TODO tailcall the corresponding dispatch_*_f functions.
-// When wrapping functions with mach_override, they are intercepted
-// automatically. But with dylib interposition this does not work, because the
-// calls within the same library are not interposed.
-// Therefore we need to re-implement dispatch_async and friends.
-
-// See dispatch/dispatch.h.
-#define DISPATCH_TIME_FOREVER (~0ull)
-typedef void (^dispatch_block_t)(void);
-
-// See
-// http://www.opensource.apple.com/source/libdispatch/libdispatch-228.18/src/init.c
-// for the implementation of _dispatch_call_block_copy_and_release().
-static void _dispatch_call_block_and_release(void *block) {
-  void (^b)(void) = (dispatch_block_t)block;
-  b();
-  _Block_release(b);
-}
-
-// See
-// http://www.opensource.apple.com/source/libdispatch/libdispatch-228.18/src/internal.h
-#define fastpath(x) ((typeof(x))__builtin_expect((uptr)(x), ~0l))
-
-// See
-// http://www.opensource.apple.com/source/libdispatch/libdispatch-228.18/src/init.c
-static dispatch_block_t _dispatch_Block_copy(dispatch_block_t db) {
-  dispatch_block_t rval;
-  if (fastpath(db)) {
-    while (!fastpath(rval = Block_copy(db))) {
-      sleep(1);
-    }
-    return rval;
-  }
-  CHECK(0 && "NULL was passed where a block should have been");
-  return (dispatch_block_t)NULL;  // Unreachable.
-}
-
-// See
-// http://www.opensource.apple.com/source/libdispatch/libdispatch-228.18/src/queue.c
-// for the implementation of dispatch_async(), dispatch_sync(),
-// dispatch_after().
-INTERCEPTOR(void, dispatch_async,
-            dispatch_queue_t dq, dispatch_block_t work) {
-  WRAP(dispatch_async_f)(dq, _dispatch_Block_copy(work),
-                         _dispatch_call_block_and_release);
-}
-
-INTERCEPTOR(void, dispatch_after,
-            dispatch_time_t when, dispatch_queue_t queue,
-            dispatch_block_t work) {
-  if (when == DISPATCH_TIME_FOREVER) {
-    CHECK(0 && "dispatch_after() called with 'when' == infinity");
-    return;  // Unreachable.
-  }
-  WRAP(dispatch_after_f)(when, queue, _dispatch_Block_copy(work),
-                         _dispatch_call_block_and_release);
-}
-#endif
-
 INTERCEPTOR(void, dispatch_group_async_f, dispatch_group_t group,
                                           dispatch_queue_t dq, void *ctxt,
                                           dispatch_function_t func) {
@@ -387,6 +372,66 @@ INTERCEPTOR(void, dispatch_group_async_f, dispatch_group_t group,
   REAL(dispatch_group_async_f)(group, dq, (void*)asan_ctxt,
                                asan_dispatch_call_block_and_release);
 }
+
+#if MAC_INTERPOSE_FUNCTIONS
+// dispatch_async, dispatch_group_async and others tailcall the corresponding
+// dispatch_*_f functions. When wrapping functions with mach_override, those
+// dispatch_*_f are intercepted automatically. But with dylib interposition
+// this does not work, because the calls within the same library are not
+// interposed.
+// Therefore we need to re-implement dispatch_async and friends.
+
+extern "C" {
+// FIXME: consolidate these declarations with asan_intercepted_functions.h.
+void dispatch_async(dispatch_queue_t dq, void(^work)(void));
+void dispatch_group_async(dispatch_group_t dg, dispatch_queue_t dq,
+                          void(^work)(void));
+void dispatch_after(dispatch_time_t when, dispatch_queue_t queue,
+                    void(^work)(void));
+void dispatch_source_set_cancel_handler(dispatch_source_t ds,
+                                        void(^work)(void));
+void dispatch_source_set_event_handler(dispatch_source_t ds, void(^work)(void));
+}
+
+#define GET_ASAN_BLOCK(work) \
+  void (^asan_block)(void);  \
+  int parent_tid = asanThreadRegistry().GetCurrentTidOrInvalid(); \
+  asan_block = ^(void) { \
+    GET_STACK_TRACE_HERE(kStackTraceMax); \
+    asan_register_worker_thread(parent_tid, &stack); \
+    work(); \
+  }
+
+INTERCEPTOR(void, dispatch_async,
+            dispatch_queue_t dq, void(^work)(void)) {
+  GET_ASAN_BLOCK(work);
+  REAL(dispatch_async)(dq, asan_block);
+}
+
+INTERCEPTOR(void, dispatch_group_async,
+            dispatch_group_t dg, dispatch_queue_t dq, void(^work)(void)) {
+  GET_ASAN_BLOCK(work);
+  REAL(dispatch_group_async)(dg, dq, asan_block);
+}
+
+INTERCEPTOR(void, dispatch_after,
+            dispatch_time_t when, dispatch_queue_t queue, void(^work)(void)) {
+  GET_ASAN_BLOCK(work);
+  REAL(dispatch_after)(when, queue, asan_block);
+}
+
+INTERCEPTOR(void, dispatch_source_set_cancel_handler,
+            dispatch_source_t ds, void(^work)(void)) {
+  GET_ASAN_BLOCK(work);
+  REAL(dispatch_source_set_cancel_handler)(ds, asan_block);
+}
+
+INTERCEPTOR(void, dispatch_source_set_event_handler,
+            dispatch_source_t ds, void(^work)(void)) {
+  GET_ASAN_BLOCK(work);
+  REAL(dispatch_source_set_event_handler)(ds, asan_block);
+}
+#endif
 
 // The following stuff has been extremely helpful while looking for the
 // unhandled functions that spawned jobs on Chromium shutdown. If the verbosity
