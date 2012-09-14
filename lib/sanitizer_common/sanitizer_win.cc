@@ -77,6 +77,7 @@ bool MemoryRangeIsAvailable(uptr range_start, uptr range_end) {
 
 void *MapFileToMemory(const char *file_name, uptr *buff_size) {
   UNIMPLEMENTED();
+  return 0;
 }
 
 const char *GetEnv(const char *name) {
@@ -174,6 +175,11 @@ uptr internal_filesize(fd_t fd) {
 }
 
 int internal_dup2(int oldfd, int newfd) {
+  UNIMPLEMENTED();
+  return 0;
+}
+
+uptr internal_readlink(const char *path, char *buf, uptr bufsize) {
   UNIMPLEMENTED();
   return 0;
 }

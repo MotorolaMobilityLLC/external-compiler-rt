@@ -31,7 +31,7 @@ class AsanThread;
 class AsanThreadSummary {
  public:
   explicit AsanThreadSummary(LinkerInitialized) { }  // for T0.
-  void Init(u32 parent_tid, AsanStackTrace *stack) {
+  void Init(u32 parent_tid, StackTrace *stack) {
     parent_tid_ = parent_tid;
     announced_ = false;
     tid_ = kInvalidTid;
@@ -40,16 +40,12 @@ class AsanThreadSummary {
     }
     thread_ = 0;
   }
-  void Announce() {
-    if (tid_ == 0) return;  // no need to announce the main thread.
-    if (!announced_) {
-      announced_ = true;
-      AsanPrintf("Thread T%d created by T%d here:\n", tid_, parent_tid_);
-      stack_.PrintStack();
-    }
-  }
   u32 tid() { return tid_; }
   void set_tid(u32 tid) { tid_ = tid; }
+  u32 parent_tid() { return parent_tid_; }
+  bool announced() { return announced_; }
+  void set_announced(bool announced) { announced_ = announced; }
+  StackTrace *stack() { return &stack_; }
   AsanThread *thread() { return thread_; }
   void set_thread(AsanThread *thread) { thread_ = thread; }
   static void TSDDtor(void *tsd);
@@ -58,7 +54,7 @@ class AsanThreadSummary {
   u32 tid_;
   u32 parent_tid_;
   bool announced_;
-  AsanStackTrace stack_;
+  StackTrace stack_;
   AsanThread *thread_;
 };
 
@@ -67,7 +63,7 @@ class AsanThread {
  public:
   explicit AsanThread(LinkerInitialized);  // for T0.
   static AsanThread *Create(u32 parent_tid, thread_callback_t start_routine,
-                            void *arg, AsanStackTrace *stack);
+                            void *arg, StackTrace *stack);
   void Destroy();
 
   void Init();  // Should be called from the thread itself.
@@ -91,7 +87,6 @@ class AsanThread {
   AsanStats &stats() { return stats_; }
 
  private:
-
   void SetThreadStackTopAndBottom();
   void ClearShadowForThreadStack();
   AsanThreadSummary *summary_;
