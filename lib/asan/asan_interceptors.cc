@@ -15,7 +15,6 @@
 
 #include "asan_allocator.h"
 #include "asan_intercepted_functions.h"
-#include "asan_interface.h"
 #include "asan_internal.h"
 #include "asan_mapping.h"
 #include "asan_report.h"
@@ -23,6 +22,7 @@
 #include "asan_stats.h"
 #include "asan_thread_registry.h"
 #include "interception/interception.h"
+#include "sanitizer/asan_interface.h"
 #include "sanitizer_common/sanitizer_libc.h"
 
 namespace __asan {
@@ -271,6 +271,11 @@ INTERCEPTOR(char*, strchr, const char *str, int c) {
 #if MAC_INTERPOSE_FUNCTIONS
   if (!asan_inited) return REAL(strchr)(str, c);
 #endif
+  // strchr is called inside create_purgeable_zone() when MallocGuardEdges=1 is
+  // used.
+  if (asan_init_is_running) {
+    return REAL(strchr)(str, c);
+  }
   ENSURE_ASAN_INITED();
   char *result = REAL(strchr)(str, c);
   if (flags()->replace_str) {
