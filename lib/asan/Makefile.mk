@@ -8,7 +8,7 @@
 #===------------------------------------------------------------------------===#
 
 ModuleName := asan
-SubDirs :=
+SubDirs := dynamic
 
 Sources := $(foreach file,$(wildcard $(Dir)/*.cc),$(notdir $(file)))
 ObjNames := $(Sources:%.cc=%.o)
@@ -19,6 +19,7 @@ Implementation := Generic
 Dependencies := $(wildcard $(Dir)/*.h)
 Dependencies += $(wildcard $(Dir)/../interception/*.h)
 Dependencies += $(wildcard $(Dir)/../interception/mach_override/*.h)
+Dependencies += $(wildcard $(Dir)/../sanitizer_common/*.h)
 
 # Define a convenience variable for all the asan functions.
 AsanFunctions := $(Sources:%.cc=%)

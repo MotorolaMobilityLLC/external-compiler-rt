@@ -55,15 +55,17 @@ void *InternalAllocBlock(void *p);
 
 // InternalScopedBuffer can be used instead of large stack arrays to
 // keep frame size low.
+// FIXME: use InternalAlloc instead of MmapOrDie once
+// InternalAlloc is made libc-free.
 template<typename T>
 class InternalScopedBuffer {
  public:
   explicit InternalScopedBuffer(uptr cnt) {
     cnt_ = cnt;
-    ptr_ = (T*)InternalAlloc(cnt * sizeof(T));
+    ptr_ = (T*)MmapOrDie(cnt * sizeof(T), "InternalScopedBuffer");
   }
   ~InternalScopedBuffer() {
-    InternalFree(ptr_);
+    UnmapOrDie(ptr_, cnt_ * sizeof(T));
   }
   T &operator[](uptr i) { return ptr_[i]; }
   T *data() { return ptr_; }
@@ -77,10 +79,27 @@ class InternalScopedBuffer {
   void operator=(const InternalScopedBuffer&);
 };
 
+// Simple low-level (mmap-based) allocator for internal use. Doesn't have
+// constructor, so all instances of LowLevelAllocator should be
+// linker initialized.
+class LowLevelAllocator {
+ public:
+  // Requires an external lock.
+  void *Allocate(uptr size);
+ private:
+  char *allocated_end_;
+  char *allocated_current_;
+};
+typedef void (*LowLevelAllocateCallback)(uptr ptr, uptr size);
+// Allows to register tool-specific callbacks for LowLevelAllocator.
+// Passing NULL removes the callback.
+void SetLowLevelAllocateCallback(LowLevelAllocateCallback callback);
+
 // IO
 void RawWrite(const char *buffer);
 void Printf(const char *format, ...);
 void Report(const char *format, ...);
+void SetPrintfAndReportCallback(void (*callback)(const char *));
 
 // Opens the file 'file_name" and reads up to 'max_len' bytes.
 // The resulting buffer is mmaped and stored in '*buff'.

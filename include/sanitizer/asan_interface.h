@@ -1,4 +1,4 @@
-//===-- asan_interface.h ----------------------------------------*- C++ -*-===//
+//===-- sanitizer/asan_interface.h ------------------------------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -12,10 +12,11 @@
 // This header can be included by the instrumented program to fetch
 // data (mostly allocator statistics) from ASan runtime library.
 //===----------------------------------------------------------------------===//
-#ifndef ASAN_INTERFACE_H
-#define ASAN_INTERFACE_H
+#ifndef SANITIZER_ASAN_INTERFACE_H
+#define SANITIZER_ASAN_INTERFACE_H
 
-#include "sanitizer_common/sanitizer_interface_defs.h"
+#include <sanitizer/common_interface_defs.h>
+
 // ----------- ATTENTION -------------
 // This header should NOT include any other headers from ASan runtime.
 // All functions in this header are extern "C" and start with __asan_.
@@ -134,6 +135,16 @@ extern "C" {
   void __asan_set_on_error_callback(void (*callback)(void))
       SANITIZER_INTERFACE_ATTRIBUTE;
 
+  // User may register its own symbolization function. It should print
+  // the description of instruction at address "pc" to "out_buffer".
+  // Description should be at most "out_size" bytes long.
+  // User-specified function should return true if symbolization was
+  // successful.
+  typedef bool (*__asan_symbolize_callback)(const void *pc, char *out_buffer,
+                                            int out_size);
+  void __asan_set_symbolize_callback(__asan_symbolize_callback callback)
+      SANITIZER_INTERFACE_ATTRIBUTE;
+
   // Returns the estimated number of bytes that will be reserved by allocator
   // for request of "size" bytes. If ASan allocator can't allocate that much
   // memory, returns the maximal possible allocation size, otherwise returns
@@ -175,6 +186,17 @@ extern "C" {
   // ASan runtime options. See asan_flags.h for details.
   const char* __asan_default_options()
       SANITIZER_WEAK_ATTRIBUTE SANITIZER_INTERFACE_ATTRIBUTE;
+
+  // Malloc hooks that may be overriden by user.
+  // __asan_malloc_hook(ptr, size) is called immediately after
+  //   allocation of "size" bytes, which returned "ptr".
+  // __asan_free_hook(ptr) is called immediately before
+  //   deallocation of "ptr".
+  // If user doesn't provide implementations of these hooks, they are no-op.
+  void __asan_malloc_hook(void *ptr, uptr size)
+      SANITIZER_WEAK_ATTRIBUTE SANITIZER_INTERFACE_ATTRIBUTE;
+  void __asan_free_hook(void *ptr)
+      SANITIZER_WEAK_ATTRIBUTE SANITIZER_INTERFACE_ATTRIBUTE;
 }  // extern "C"
 
-#endif  // ASAN_INTERFACE_H
+#endif  // SANITIZER_ASAN_INTERFACE_H

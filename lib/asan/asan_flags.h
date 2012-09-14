@@ -15,7 +15,7 @@
 #ifndef ASAN_FLAGS_H
 #define ASAN_FLAGS_H
 
-#include "sanitizer_common/sanitizer_interface_defs.h"
+#include "sanitizer/common_interface_defs.h"
 
 // ASan flag values can be defined in three ways:
 // 1) initialized with default values at startup.
@@ -84,8 +84,15 @@ struct Flags {
   // By default, disable core dumper on 64-bit - it makes little sense
   // to dump 16T+ core.
   bool disable_core;
+  // Allow the tool to re-exec the program. This may interfere badly with the
+  // debugger.
+  bool allow_reexec;
   // Strips this prefix from file paths in error reports.
   const char *strip_path_prefix;
+  // If set, prints not only thread creation stacks for threads in error report,
+  // but also thread creation stacks for threads that created those threads,
+  // etc. up to main thread.
+  bool print_full_thread_history;
 };
 
 Flags *flags();

@@ -10,21 +10,15 @@ set(SANITIZER_SOURCES
   sanitizer_mac.cc
   sanitizer_posix.cc
   sanitizer_printf.cc
+  sanitizer_stacktrace.cc
   sanitizer_symbolizer.cc
   sanitizer_symbolizer_linux.cc
-  sanitizer_symbolizer_llvm.cc
   sanitizer_symbolizer_mac.cc
   sanitizer_symbolizer_win.cc
   sanitizer_win.cc
   )
 
-set(SANITIZER_CFLAGS
-  -O3
-  -fPIC
-  -fno-exceptions
-  -funwind-tables
-  -fvisibility=hidden
-  )
+set(SANITIZER_CFLAGS ${SANITIZER_COMMON_CFLAGS})
 
 set(SANITIZER_COMMON_DEFINITIONS)
 
@@ -50,6 +44,12 @@ else()
     set_target_compile_flags(RTSanitizerCommon.i386
       ${SANITIZER_CFLAGS} ${TARGET_I386_CFLAGS})
     list(APPEND SANITIZER_RUNTIME_LIBRARIES RTSanitizerCommon.i386)
+  endif()
+  if(CAN_TARGET_ARM_ANDROID)
+    add_library(RTSanitizerCommon.arm.android OBJECT ${SANITIZER_SOURCES})
+    set_target_compile_flags(RTSanitizerCommon.arm.android
+      ${SANITIZER_CFLAGS} ${TARGET_ARM_ANDROID_CFLAGS})
+    list(APPEND SANITIZER_RUNTIME_LIBRARIES RTSanitizerCommon.arm.android)
   endif()
 endif()
 
