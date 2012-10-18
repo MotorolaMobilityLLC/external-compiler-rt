@@ -99,13 +99,12 @@ LOCAL_MODULE := libasan_preload
 LOCAL_MODULE_TAGS := eng
 LOCAL_C_INCLUDES := \
   bionic \
-  external/stlport/stlport \
   external/compiler-rt/lib \
   external/compiler-rt/include
 LOCAL_CFLAGS += $(asan_rtl_cflags)
 LOCAL_SRC_FILES := $(asan_rtl_files)
 LOCAL_CPP_EXTENSION := .cc
-LOCAL_SHARED_LIBRARIES := libc libstlport libdl
+LOCAL_SHARED_LIBRARIES := libc libdl
 LOCAL_CLANG := true
 include $(BUILD_SHARED_LIBRARY)
 
