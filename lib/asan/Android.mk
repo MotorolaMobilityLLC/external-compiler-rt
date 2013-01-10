@@ -24,32 +24,43 @@ ASAN_HAS_EXCEPTIONS=1
 ASAN_FLEXIBLE_MAPPING_AND_OFFSET=0
 
 asan_rtl_files := \
-	asan_rtl.cc \
 	asan_allocator.cc	\
+	asan_allocator2.cc	\
+	asan_fake_stack.cc \
 	asan_globals.cc	\
 	asan_interceptors.cc	\
 	asan_linux.cc \
+	asan_mac.cc \
 	asan_malloc_linux.cc \
 	asan_malloc_mac.cc \
+	asan_malloc_win.cc \
 	asan_new_delete.cc	\
 	asan_poisoning.cc	\
 	asan_posix.cc \
 	asan_report.cc	\
+	asan_rtl.cc \
 	asan_stack.cc	\
 	asan_stats.cc	\
 	asan_thread.cc	\
 	asan_thread_registry.cc \
+	asan_win.cc \
 	../interception/interception_linux.cc \
 	../sanitizer_common/sanitizer_allocator.cc \
 	../sanitizer_common/sanitizer_common.cc \
 	../sanitizer_common/sanitizer_flags.cc \
 	../sanitizer_common/sanitizer_libc.cc \
 	../sanitizer_common/sanitizer_linux.cc \
+	../sanitizer_common/sanitizer_mac.cc \
 	../sanitizer_common/sanitizer_posix.cc \
 	../sanitizer_common/sanitizer_printf.cc \
+	../sanitizer_common/sanitizer_stackdepot.cc \
 	../sanitizer_common/sanitizer_stacktrace.cc \
 	../sanitizer_common/sanitizer_symbolizer.cc \
+	../sanitizer_common/sanitizer_symbolizer_itanium.cc \
 	../sanitizer_common/sanitizer_symbolizer_linux.cc \
+	../sanitizer_common/sanitizer_symbolizer_mac.cc \
+	../sanitizer_common/sanitizer_symbolizer_win.cc \
+	../sanitizer_common/sanitizer_win.cc \
 
 asan_rtl_cflags := \
 	-fvisibility=hidden \
@@ -64,9 +75,11 @@ asan_rtl_cflags := \
 	-D__WORDSIZE=32
 
 asan_test_files := \
-	tests/asan_test.cc \
 	tests/asan_globals_test.cc \
-	tests/asan_break_optimization.cc
+	tests/asan_test.cc
+
+#tests/asan_noinst_test.cc \
+#tests/asan_test_main.cc \
 
 asan_test_cflags := \
 	-mllvm -asan-blacklist=external/compiler-rt/lib/asan/tests/asan_test.ignore \
@@ -138,8 +151,10 @@ LOCAL_CFLAGS += \
         -Wno-sign-compare \
         -DASAN_UAR=0 \
         -DASAN_HAS_BLACKLIST=1 \
+	-DASAN_HAS_EXCEPTIONS=$(ASAN_HAS_EXCEPTIONS) \
+	-DASAN_NEEDS_SEGV=$(ASAN_NEEDS_SEGV) \
         -D__WORDSIZE=32
-LOCAL_SRC_FILES := tests/asan_noinst_test.cc
+LOCAL_SRC_FILES := tests/asan_noinst_test.cc tests/asan_test_main.cc
 LOCAL_CPP_EXTENSION := .cc
 LOCAL_CLANG := true
 include $(BUILD_STATIC_LIBRARY)
