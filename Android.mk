@@ -29,7 +29,9 @@ LOCAL_MODULE_TAGS := optional
 LOCAL_MODULE_CLASS := STATIC_LIBRARIES
 LOCAL_CLANG := true
 LOCAL_CFLAGS := -integrated-as
-
+ifeq ($(TARGET_ARCH),arm)
+LOCAL_CFLAGS += -D__ARM_EABI__
+endif
 # TODO: split out the asflags.
 LOCAL_ASFLAGS := $(LOCAL_CFLAGS)
 
