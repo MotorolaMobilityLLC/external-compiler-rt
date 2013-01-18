@@ -29,6 +29,7 @@ LOCAL_MODULE_TAGS := optional
 LOCAL_MODULE_CLASS := STATIC_LIBRARIES
 LOCAL_CLANG := true
 LOCAL_CFLAGS := -integrated-as
+
 # TODO: split out the asflags.
 LOCAL_ASFLAGS := $(LOCAL_CFLAGS)
 
@@ -70,7 +71,9 @@ ifeq ($(TARGET_ARCH),arm)
     lib/arm/subsf3vfp.S \
     lib/arm/truncdfsf2vfp.S \
     lib/arm/unorddf2vfp.S \
-    lib/arm/unordsf2vfp.S
+    lib/arm/unordsf2vfp.S \
+    lib/arm/aeabi_ldivmod.S \
+    lib/arm/aeabi_uldivmod.S
 else
   ifeq ($(TARGET_ARCH),x86) # We don't support x86-64 right now
     LOCAL_SRC_FILES += \
