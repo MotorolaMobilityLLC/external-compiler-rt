@@ -58,6 +58,10 @@ struct AddressInfo {
 // of descriptions actually filled.
 // This function should NOT be called from two threads simultaneously.
 uptr SymbolizeCode(uptr address, AddressInfo *frames, uptr max_frames);
+bool SymbolizeData(uptr address, AddressInfo *frame);
+
+// Attempts to demangle the provided C++ mangled name.
+const char *Demangle(const char *Name);
 
 // Starts external symbolizer program in a subprocess. Sanitizer communicates
 // with external symbolizer via pipes.
@@ -79,7 +83,7 @@ class LoadedModule {
   };
   char *full_name_;
   uptr base_address_;
-  static const uptr kMaxNumberOfAddressRanges = 8;
+  static const uptr kMaxNumberOfAddressRanges = 6;
   AddressRange ranges_[kMaxNumberOfAddressRanges];
   uptr n_ranges_;
 };

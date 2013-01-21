@@ -66,6 +66,15 @@ extern "C" {
   void __asan_stack_free(uptr ptr, uptr size, uptr real_stack)
       SANITIZER_INTERFACE_ATTRIBUTE;
 
+  // These two functions are used by instrumented code in the
+  // use-after-scope mode. They mark memory for local variables as
+  // unaddressable when they leave scope and addressable before the
+  // function exits.
+  void __asan_poison_stack_memory(uptr addr, uptr size)
+      SANITIZER_INTERFACE_ATTRIBUTE;
+  void __asan_unpoison_stack_memory(uptr addr, uptr size)
+      SANITIZER_INTERFACE_ATTRIBUTE;
+
   // Marks memory region [addr, addr+size) as unaddressable.
   // This memory must be previously allocated by the user program. Accessing
   // addresses in this region from instrumented code is forbidden until
@@ -108,6 +117,15 @@ extern "C" {
   bool __asan_address_is_poisoned(void const volatile *addr)
       SANITIZER_INTERFACE_ATTRIBUTE;
 
+  // If at least on byte in [beg, beg+size) is poisoned, return the address
+  // of the first such byte. Otherwise return 0.
+  uptr __asan_region_is_poisoned(uptr beg, uptr size)
+      SANITIZER_INTERFACE_ATTRIBUTE;
+
+  // Print the description of addr (useful when debugging in gdb).
+  void __asan_describe_address(uptr addr)
+      SANITIZER_INTERFACE_ATTRIBUTE;
+
   // This is an internal function that is called to report an error.
   // However it is still a part of the interface because users may want to
   // set a breakpoint on this function in a debugger.
@@ -128,22 +146,20 @@ extern "C" {
   void __asan_set_error_report_callback(void (*callback)(const char*))
       SANITIZER_INTERFACE_ATTRIBUTE;
 
-  // Sets the callback to be called right when ASan detects an error.
-  // This can be used to notice cases when ASan detects an error, but the
-  // program crashes before ASan report is printed.
-  // Passing 0 unsets the callback.
-  void __asan_set_on_error_callback(void (*callback)(void))
-      SANITIZER_INTERFACE_ATTRIBUTE;
+  // User may provide function that would be called right when ASan detects
+  // an error. This can be used to notice cases when ASan detects an error, but
+  // the program crashes before ASan report is printed.
+  /* OPTIONAL */ void __asan_on_error()
+      SANITIZER_WEAK_ATTRIBUTE SANITIZER_INTERFACE_ATTRIBUTE;
 
-  // User may register its own symbolization function. It should print
-  // the description of instruction at address "pc" to "out_buffer".
-  // Description should be at most "out_size" bytes long.
+  // User may provide its own implementation for symbolization function.
+  // It should print the description of instruction at address "pc" to
+  // "out_buffer". Description should be at most "out_size" bytes long.
   // User-specified function should return true if symbolization was
   // successful.
-  typedef bool (*__asan_symbolize_callback)(const void *pc, char *out_buffer,
-                                            int out_size);
-  void __asan_set_symbolize_callback(__asan_symbolize_callback callback)
-      SANITIZER_INTERFACE_ATTRIBUTE;
+  /* OPTIONAL */ bool __asan_symbolize(const void *pc, char *out_buffer,
+                                       int out_size)
+      SANITIZER_WEAK_ATTRIBUTE SANITIZER_INTERFACE_ATTRIBUTE;
 
   // Returns the estimated number of bytes that will be reserved by allocator
   // for request of "size" bytes. If ASan allocator can't allocate that much
@@ -182,20 +198,19 @@ extern "C" {
   void __asan_print_accumulated_stats()
       SANITIZER_INTERFACE_ATTRIBUTE;
 
-  // This function may be overriden by user to provide a string containing
-  // ASan runtime options. See asan_flags.h for details.
-  const char* __asan_default_options()
+  // This function may be optionally provided by user and should return
+  // a string containing ASan runtime options. See asan_flags.h for details.
+  /* OPTIONAL */ const char* __asan_default_options()
       SANITIZER_WEAK_ATTRIBUTE SANITIZER_INTERFACE_ATTRIBUTE;
 
-  // Malloc hooks that may be overriden by user.
+  // Malloc hooks that may be optionally provided by user.
   // __asan_malloc_hook(ptr, size) is called immediately after
   //   allocation of "size" bytes, which returned "ptr".
   // __asan_free_hook(ptr) is called immediately before
   //   deallocation of "ptr".
-  // If user doesn't provide implementations of these hooks, they are no-op.
-  void __asan_malloc_hook(void *ptr, uptr size)
+  /* OPTIONAL */ void __asan_malloc_hook(void *ptr, uptr size)
       SANITIZER_WEAK_ATTRIBUTE SANITIZER_INTERFACE_ATTRIBUTE;
-  void __asan_free_hook(void *ptr)
+  /* OPTIONAL */ void __asan_free_hook(void *ptr)
       SANITIZER_WEAK_ATTRIBUTE SANITIZER_INTERFACE_ATTRIBUTE;
 }  // extern "C"
 

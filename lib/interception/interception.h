@@ -19,6 +19,15 @@
 # error "Interception doesn't work on this operating system."
 #endif
 
+#include "sanitizer/common_interface_defs.h"
+
+// These typedefs should be used only in the interceptor definitions to replace
+// the standard system types (e.g. SSIZE_T instead of ssize_t)
+typedef __sanitizer::uptr SIZE_T;
+typedef __sanitizer::sptr SSIZE_T;
+typedef __sanitizer::u64  OFF_T;
+typedef __sanitizer::u64  OFF64_T;
+
 // How to use this library:
 //      1) Include this header to define your own interceptors
 //         (see details below).
@@ -90,7 +99,7 @@
 # define WRAP(x) wrap_##x
 # define WRAPPER_NAME(x) "wrap_"#x
 # define INTERCEPTOR_ATTRIBUTE
-# define DECLARE_WRAPPER(ret_type, convention, func, ...)
+# define DECLARE_WRAPPER(ret_type, func, ...)
 #elif defined(_WIN32)
 # if defined(_DLL)  // DLL CRT
 #  define WRAP(x) x
@@ -101,13 +110,13 @@
 #  define WRAPPER_NAME(x) "wrap_"#x
 #  define INTERCEPTOR_ATTRIBUTE
 # endif
-# define DECLARE_WRAPPER(ret_type, convention, func, ...)
+# define DECLARE_WRAPPER(ret_type, func, ...)
 #else
 # define WRAP(x) __interceptor_ ## x
 # define WRAPPER_NAME(x) "__interceptor_" #x
 # define INTERCEPTOR_ATTRIBUTE __attribute__((visibility("default")))
-# define DECLARE_WRAPPER(ret_type, convention, func, ...) \
-    extern "C" ret_type convention func(__VA_ARGS__) \
+# define DECLARE_WRAPPER(ret_type, func, ...) \
+    extern "C" ret_type func(__VA_ARGS__) \
     __attribute__((weak, alias("__interceptor_" #func), visibility("default")));
 #endif
 
@@ -128,44 +137,40 @@
 #endif  // MAC_INTERPOSE_FUNCTIONS
 
 #define DECLARE_REAL_AND_INTERCEPTOR(ret_type, func, ...) \
-  DECLARE_REAL(ret_type, func, ##__VA_ARGS__) \
+  DECLARE_REAL(ret_type, func, __VA_ARGS__) \
   extern "C" ret_type WRAP(func)(__VA_ARGS__);
-
-// FIXME(timurrrr): We might need to add DECLARE_REAL_EX etc to support
-// different calling conventions later.
-
-#if !MAC_INTERPOSE_FUNCTIONS
-# define DEFINE_REAL_EX(ret_type, convention, func, ...) \
-    typedef ret_type (convention *FUNC_TYPE(func))(__VA_ARGS__); \
-    namespace __interception { \
-      FUNC_TYPE(func) PTR_TO_REAL(func); \
-    }
-#else
-# define DEFINE_REAL_EX(ret_type, convention, func, ...)
-#endif
 
 // Generally, you don't need to use DEFINE_REAL by itself, as INTERCEPTOR
 // macros does its job. In exceptional cases you may need to call REAL(foo)
 // without defining INTERCEPTOR(..., foo, ...). For example, if you override
 // foo with an interceptor for other function.
-#define DEFAULT_CONVENTION
-
-#define DEFINE_REAL(ret_type, func, ...) \
-  DEFINE_REAL_EX(ret_type, DEFAULT_CONVENTION, func, __VA_ARGS__)
-
-#define INTERCEPTOR_EX(ret_type, convention, func, ...) \
-  DEFINE_REAL_EX(ret_type, convention, func, __VA_ARGS__) \
-  DECLARE_WRAPPER(ret_type, convention, func, __VA_ARGS__) \
-  extern "C" \
-  INTERCEPTOR_ATTRIBUTE \
-  ret_type convention WRAP(func)(__VA_ARGS__)
+#if !MAC_INTERPOSE_FUNCTIONS
+# define DEFINE_REAL(ret_type, func, ...) \
+    typedef ret_type (*FUNC_TYPE(func))(__VA_ARGS__); \
+    namespace __interception { \
+      FUNC_TYPE(func) PTR_TO_REAL(func); \
+    }
+#else
+# define DEFINE_REAL(ret_type, func, ...)
+#endif
 
 #define INTERCEPTOR(ret_type, func, ...) \
-  INTERCEPTOR_EX(ret_type, DEFAULT_CONVENTION, func, __VA_ARGS__)
+  DEFINE_REAL(ret_type, func, __VA_ARGS__) \
+  DECLARE_WRAPPER(ret_type, func, __VA_ARGS__) \
+  extern "C" \
+  INTERCEPTOR_ATTRIBUTE \
+  ret_type WRAP(func)(__VA_ARGS__)
 
 #if defined(_WIN32)
 # define INTERCEPTOR_WINAPI(ret_type, func, ...) \
-  INTERCEPTOR_EX(ret_type, __stdcall, func, __VA_ARGS__)
+    typedef ret_type (__stdcall *FUNC_TYPE(func))(__VA_ARGS__); \
+    namespace __interception { \
+      FUNC_TYPE(func) PTR_TO_REAL(func); \
+    } \
+    DECLARE_WRAPPER(ret_type, func, __VA_ARGS__) \
+    extern "C" \
+    INTERCEPTOR_ATTRIBUTE \
+    ret_type __stdcall WRAP(func)(__VA_ARGS__)
 #endif
 
 // ISO C++ forbids casting between pointer-to-function and pointer-to-object,
@@ -174,7 +179,11 @@
 // challenging, as we don't even pass function type to
 // INTERCEPT_FUNCTION macro, only its name.
 namespace __interception {
+#if defined(_WIN64)
+typedef unsigned long long uptr;  // NOLINT
+#else
 typedef unsigned long uptr;  // NOLINT
+#endif  // _WIN64
 }  // namespace __interception
 
 #define INCLUDED_FROM_INTERCEPTION_LIB

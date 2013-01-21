@@ -25,6 +25,8 @@
 #include "asan_mac.h"
 #include "asan_report.h"
 #include "asan_stack.h"
+#include "asan_stats.h"
+#include "asan_thread_registry.h"
 
 // Similar code is used in Google Perftools,
 // http://code.google.com/p/google-perftools.
@@ -90,13 +92,9 @@ INTERCEPTOR(void, free, void *ptr) {
 #endif
   } else {
     if (!asan_mz_size(ptr)) ptr = get_saved_cfallocator_ref(ptr);
-    GET_STACK_TRACE_HERE_FOR_FREE(ptr);
-    asan_free(ptr, &stack);
+    GET_STACK_TRACE_FREE;
+    asan_free(ptr, &stack, FROM_MALLOC);
   }
-}
-
-namespace __asan {
-  void ReplaceCFAllocator();
 }
 
 // We can't always replace the default CFAllocator with cf_asan right in
@@ -108,7 +106,7 @@ namespace __asan {
 //
 // See http://code.google.com/p/address-sanitizer/issues/detail?id=87
 // and http://opensource.apple.com/source/CF/CF-550.43/CFRuntime.c
-INTERCEPTOR(void, __CFInitialize) {
+INTERCEPTOR(void, __CFInitialize, void) {
   // If the runtime is built as dynamic library, __CFInitialize wrapper may be
   // called before __asan_init.
 #if !MAC_INTERPOSE_FUNCTIONS
@@ -116,7 +114,7 @@ INTERCEPTOR(void, __CFInitialize) {
   CHECK(asan_inited);
 #endif
   REAL(__CFInitialize)();
-  if (!cf_asan && asan_inited) ReplaceCFAllocator();
+  if (!cf_asan && asan_inited) MaybeReplaceCFAllocator();
 }
 
 namespace {
@@ -132,7 +130,7 @@ void *mz_malloc(malloc_zone_t *zone, size_t size) {
     CHECK(system_malloc_zone);
     return malloc_zone_malloc(system_malloc_zone, size);
   }
-  GET_STACK_TRACE_HERE_FOR_MALLOC;
+  GET_STACK_TRACE_MALLOC;
   return asan_malloc(size, &stack);
 }
 
@@ -141,7 +139,7 @@ void *cf_malloc(CFIndex size, CFOptionFlags hint, void *info) {
     CHECK(system_malloc_zone);
     return malloc_zone_malloc(system_malloc_zone, size);
   }
-  GET_STACK_TRACE_HERE_FOR_MALLOC;
+  GET_STACK_TRACE_MALLOC;
   return asan_malloc(size, &stack);
 }
 
@@ -157,7 +155,7 @@ void *mz_calloc(malloc_zone_t *zone, size_t nmemb, size_t size) {
     CHECK(allocated < kCallocPoolSize);
     return mem;
   }
-  GET_STACK_TRACE_HERE_FOR_MALLOC;
+  GET_STACK_TRACE_MALLOC;
   return asan_calloc(nmemb, size, &stack);
 }
 
@@ -166,8 +164,8 @@ void *mz_valloc(malloc_zone_t *zone, size_t size) {
     CHECK(system_malloc_zone);
     return malloc_zone_valloc(system_malloc_zone, size);
   }
-  GET_STACK_TRACE_HERE_FOR_MALLOC;
-  return asan_memalign(kPageSize, size, &stack);
+  GET_STACK_TRACE_MALLOC;
+  return asan_memalign(GetPageSizeCached(), size, &stack, FROM_MALLOC);
 }
 
 #define GET_ZONE_FOR_PTR(ptr) \
@@ -177,8 +175,8 @@ void *mz_valloc(malloc_zone_t *zone, size_t size) {
 void ALWAYS_INLINE free_common(void *context, void *ptr) {
   if (!ptr) return;
   if (asan_mz_size(ptr)) {
-    GET_STACK_TRACE_HERE_FOR_FREE(ptr);
-    asan_free(ptr, &stack);
+    GET_STACK_TRACE_FREE;
+    asan_free(ptr, &stack, FROM_MALLOC);
   } else {
     // If the pointer does not belong to any of the zones, use one of the
     // fallback methods to free memory.
@@ -192,9 +190,9 @@ void ALWAYS_INLINE free_common(void *context, void *ptr) {
       // If the memory chunk pointer was moved to store additional
       // CFAllocatorRef, fix it back.
       ptr = get_saved_cfallocator_ref(ptr);
-      GET_STACK_TRACE_HERE_FOR_FREE(ptr);
+      GET_STACK_TRACE_FREE;
       if (!flags()->mac_ignore_invalid_free) {
-        asan_free(ptr, &stack);
+        asan_free(ptr, &stack, FROM_MALLOC);
       } else {
         GET_ZONE_FOR_PTR(ptr);
         WarnMacFreeUnallocated((uptr)ptr, (uptr)zone_ptr, zone_name, &stack);
@@ -215,17 +213,17 @@ void cf_free(void *ptr, void *info) {
 
 void *mz_realloc(malloc_zone_t *zone, void *ptr, size_t size) {
   if (!ptr) {
-    GET_STACK_TRACE_HERE_FOR_MALLOC;
+    GET_STACK_TRACE_MALLOC;
     return asan_malloc(size, &stack);
   } else {
     if (asan_mz_size(ptr)) {
-      GET_STACK_TRACE_HERE_FOR_MALLOC;
+      GET_STACK_TRACE_MALLOC;
       return asan_realloc(ptr, size, &stack);
     } else {
       // We can't recover from reallocating an unknown address, because
       // this would require reading at most |size| bytes from
       // potentially unaccessible memory.
-      GET_STACK_TRACE_HERE_FOR_FREE(ptr);
+      GET_STACK_TRACE_FREE;
       GET_ZONE_FOR_PTR(ptr);
       ReportMacMzReallocUnknown((uptr)ptr, (uptr)zone_ptr, zone_name, &stack);
     }
@@ -234,17 +232,17 @@ void *mz_realloc(malloc_zone_t *zone, void *ptr, size_t size) {
 
 void *cf_realloc(void *ptr, CFIndex size, CFOptionFlags hint, void *info) {
   if (!ptr) {
-    GET_STACK_TRACE_HERE_FOR_MALLOC;
+    GET_STACK_TRACE_MALLOC;
     return asan_malloc(size, &stack);
   } else {
     if (asan_mz_size(ptr)) {
-      GET_STACK_TRACE_HERE_FOR_MALLOC;
+      GET_STACK_TRACE_MALLOC;
       return asan_realloc(ptr, size, &stack);
     } else {
       // We can't recover from reallocating an unknown address, because
       // this would require reading at most |size| bytes from
       // potentially unaccessible memory.
-      GET_STACK_TRACE_HERE_FOR_FREE(ptr);
+      GET_STACK_TRACE_FREE;
       GET_ZONE_FOR_PTR(ptr);
       ReportMacCfReallocUnknown((uptr)ptr, (uptr)zone_ptr, zone_name, &stack);
     }
@@ -263,8 +261,8 @@ void *mz_memalign(malloc_zone_t *zone, size_t align, size_t size) {
     CHECK(system_malloc_zone);
     return malloc_zone_memalign(system_malloc_zone, align, size);
   }
-  GET_STACK_TRACE_HERE_FOR_MALLOC;
-  return asan_memalign(align, size, &stack);
+  GET_STACK_TRACE_MALLOC;
+  return asan_memalign(align, size, &stack, FROM_MALLOC);
 }
 
 // This function is currently unused, and we build with -Werror.
@@ -276,7 +274,6 @@ void mz_free_definite_size(malloc_zone_t* zone, void *ptr, size_t size) {
 #endif
 #endif
 
-// malloc_introspection callbacks.  I'm not clear on what all of these do.
 kern_return_t mi_enumerator(task_t task, void *,
                             unsigned type_mask, vm_address_t zone_address,
                             memory_reader_t reader,
@@ -292,12 +289,10 @@ size_t mi_good_size(malloc_zone_t *zone, size_t size) {
 
 boolean_t mi_check(malloc_zone_t *zone) {
   UNIMPLEMENTED();
-  return true;
 }
 
 void mi_print(malloc_zone_t *zone, boolean_t verbose) {
   UNIMPLEMENTED();
-  return;
 }
 
 void mi_log(malloc_zone_t *zone, void *address) {
@@ -312,17 +307,12 @@ void mi_force_unlock(malloc_zone_t *zone) {
   asan_mz_force_unlock();
 }
 
-// This function is currently unused, and we build with -Werror.
-#if 0
 void mi_statistics(malloc_zone_t *zone, malloc_statistics_t *stats) {
-  // TODO(csilvers): figure out how to fill these out
-  // TODO(glider): port this from tcmalloc when ready.
-  stats->blocks_in_use = 0;
-  stats->size_in_use = 0;
-  stats->max_size_in_use = 0;
-  stats->size_allocated = 0;
+  AsanMallocStats malloc_stats;
+  asanThreadRegistry().FillMallocStatistics(&malloc_stats);
+  CHECK(sizeof(malloc_statistics_t) == sizeof(AsanMallocStats));
+  internal_memcpy(stats, &malloc_stats, sizeof(malloc_statistics_t));
 }
-#endif
 
 #if defined(MAC_OS_X_VERSION_10_6) && \
     MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_6
@@ -337,7 +327,7 @@ boolean_t mi_zone_locked(malloc_zone_t *zone) {
 extern int __CFRuntimeClassTableSize;
 
 namespace __asan {
-void ReplaceCFAllocator() {
+void MaybeReplaceCFAllocator() {
   static CFAllocatorContext asan_context = {
         /*version*/ 0, /*info*/ &asan_zone,
         /*retain*/ 0, /*release*/ 0,
@@ -348,7 +338,7 @@ void ReplaceCFAllocator() {
         /*preferredSize*/ 0 };
   if (!cf_asan)
     cf_asan = CFAllocatorCreate(kCFAllocatorUseContext, &asan_context);
-  if (CFAllocatorGetDefault() != cf_asan)
+  if (flags()->replace_cfallocator && CFAllocatorGetDefault() != cf_asan)
     CFAllocatorSetDefault(cf_asan);
 }
 
@@ -364,6 +354,7 @@ void ReplaceSystemMalloc() {
   asan_introspection.log = &mi_log;
   asan_introspection.force_lock = &mi_force_lock;
   asan_introspection.force_unlock = &mi_force_unlock;
+  asan_introspection.statistics = &mi_statistics;
 
   internal_memset(&asan_zone, 0, sizeof(malloc_zone_t));
 
@@ -415,16 +406,14 @@ void ReplaceSystemMalloc() {
   // Make sure the default allocator was replaced.
   CHECK(malloc_default_zone() == &asan_zone);
 
-  if (flags()->replace_cfallocator) {
-    // If __CFInitialize() hasn't been called yet, cf_asan will be created and
-    // installed as the default allocator after __CFInitialize() finishes (see
-    // the interceptor for __CFInitialize() above). Otherwise install cf_asan
-    // right now. On both Snow Leopard and Lion __CFInitialize() calls
-    // __CFAllocatorInitialize(), which initializes the _base._cfisa field of
-    // the default allocators we check here.
-    if (((CFRuntimeBase*)kCFAllocatorSystemDefault)->_cfisa) {
-      ReplaceCFAllocator();
-    }
+  // If __CFInitialize() hasn't been called yet, cf_asan will be created and
+  // installed as the default allocator after __CFInitialize() finishes (see
+  // the interceptor for __CFInitialize() above). Otherwise install cf_asan
+  // right now. On both Snow Leopard and Lion __CFInitialize() calls
+  // __CFAllocatorInitialize(), which initializes the _base._cfisa field of
+  // the default allocators we check here.
+  if (((CFRuntimeBase*)kCFAllocatorSystemDefault)->_cfisa) {
+    MaybeReplaceCFAllocator();
   }
 }
 }  // namespace __asan

@@ -24,8 +24,7 @@ using namespace __sanitizer;  // NOLINT
 #define WEAK SANITIZER_WEAK_ATTRIBUTE
 
 // Platform-specific defs.
-#if defined(_WIN32)
-typedef unsigned long    DWORD;  // NOLINT
+#if defined(_MSC_VER)
 # define ALWAYS_INLINE __declspec(forceinline)
 // FIXME(timurrrr): do we need this on Windows?
 # define ALIAS(x)
@@ -35,7 +34,11 @@ typedef unsigned long    DWORD;  // NOLINT
 # define NORETURN __declspec(noreturn)
 # define THREADLOCAL   __declspec(thread)
 # define NOTHROW
-#else  // _WIN32
+# define LIKELY(x) (x)
+# define UNLIKELY(x) (x)
+# define UNUSED
+# define USED
+#else  // _MSC_VER
 # define ALWAYS_INLINE __attribute__((always_inline))
 # define ALIAS(x) __attribute__((alias(x)))
 # define ALIGNED(x) __attribute__((aligned(x)))
@@ -43,22 +46,15 @@ typedef unsigned long    DWORD;  // NOLINT
 # define NOINLINE __attribute__((noinline))
 # define NORETURN  __attribute__((noreturn))
 # define THREADLOCAL   __thread
-# ifdef __cplusplus
-#   define NOTHROW throw()
-# else
-#   define NOTHROW __attribute__((__nothrow__))
-#endif
-#endif  // _WIN32
-
-// We have no equivalent of these on Windows.
-#ifndef _WIN32
+# define NOTHROW throw()
 # define LIKELY(x)     __builtin_expect(!!(x), 1)
 # define UNLIKELY(x)   __builtin_expect(!!(x), 0)
 # define UNUSED __attribute__((unused))
 # define USED __attribute__((used))
-#endif
+#endif  // _MSC_VER
 
 #if defined(_WIN32)
+typedef unsigned long DWORD;  // NOLINT
 typedef DWORD thread_return_t;
 # define THREAD_CALLING_CONV __stdcall
 #else  // _WIN32
@@ -67,15 +63,11 @@ typedef void* thread_return_t;
 #endif  // _WIN32
 typedef thread_return_t (THREAD_CALLING_CONV *thread_callback_t)(void* arg);
 
-// If __WORDSIZE was undefined by the platform, define it in terms of the
-// compiler built-ins __LP64__ and _WIN64.
-#ifndef __WORDSIZE
-# if __LP64__ || defined(_WIN64)
-#  define __WORDSIZE 64
-# else
-#  define __WORDSIZE 32
-#  endif
-#endif  // __WORDSIZE
+#if __LP64__ || defined(_WIN64)
+#  define SANITIZER_WORDSIZE 64
+#else
+#  define SANITIZER_WORDSIZE 32
+#endif
 
 // NOTE: Functions below must be defined in each run-time.
 namespace __sanitizer {
@@ -130,7 +122,12 @@ void NORETURN CheckFailed(const char *file, int line, const char *cond,
 #define DCHECK_GE(a, b)
 #endif
 
-#define UNIMPLEMENTED() CHECK("unimplemented" && 0)
+#define UNREACHABLE(msg) do { \
+  CHECK(0 && msg); \
+  Die(); \
+} while (0)
+
+#define UNIMPLEMENTED() UNREACHABLE("unimplemented")
 
 #define COMPILER_CHECK(pred) IMPL_COMPILER_ASSERT(pred, __LINE__)
 
@@ -138,17 +135,19 @@ void NORETURN CheckFailed(const char *file, int line, const char *cond,
 
 #define IMPL_PASTE(a, b) a##b
 #define IMPL_COMPILER_ASSERT(pred, line) \
-    typedef char IMPL_PASTE(assertion_failed_##_, line)[2*(int)(pred)-1];
+    typedef char IMPL_PASTE(assertion_failed_##_, line)[2*(int)(pred)-1]
 
 // Limits for integral types. We have to redefine it in case we don't
 // have stdint.h (like in Visual Studio 9).
-#if __WORDSIZE == 64
+#undef __INT64_C
+#undef __UINT64_C
+#if SANITIZER_WORDSIZE == 64
 # define __INT64_C(c)  c ## L
 # define __UINT64_C(c) c ## UL
 #else
 # define __INT64_C(c)  c ## LL
 # define __UINT64_C(c) c ## ULL
-#endif  // __WORDSIZE == 64
+#endif  // SANITIZER_WORDSIZE == 64
 #undef INT32_MIN
 #define INT32_MIN              (-2147483647-1)
 #undef INT32_MAX
@@ -164,7 +163,7 @@ void NORETURN CheckFailed(const char *file, int line, const char *cond,
 
 enum LinkerInitialized { LINKER_INITIALIZED = 0 };
 
-#if !defined(_WIN32) || defined(__clang__)
+#if !defined(_MSC_VER) || defined(__clang__)
 # define GET_CALLER_PC() (uptr)__builtin_return_address(0)
 # define GET_CURRENT_FRAME() (uptr)__builtin_frame_address(0)
 #else
@@ -176,5 +175,11 @@ extern "C" void* _ReturnAddress(void);
 // clear if the BP value is needed in the ASan reports on Windows.
 # define GET_CURRENT_FRAME() (uptr)0xDEADBEEF
 #endif
+
+#define HANDLE_EINTR(res, f) {                               \
+  do {                                                                  \
+    res = (f);                                                         \
+  } while (res == -1 && errno == EINTR); \
+  }
 
 #endif  // SANITIZER_DEFS_H

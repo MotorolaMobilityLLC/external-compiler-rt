@@ -62,7 +62,11 @@
 
 // If set, asan will install its own SEGV signal handler.
 #ifndef ASAN_NEEDS_SEGV
-# define ASAN_NEEDS_SEGV 1
+# if ASAN_ANDROID == 1
+#  define ASAN_NEEDS_SEGV 0
+# else
+#  define ASAN_NEEDS_SEGV 1
+# endif
 #endif
 
 // If set, asan will intercept C++ exception api call(s).
@@ -79,7 +83,11 @@
 // If set, values like allocator chunk size, as well as defaults for some flags
 // will be changed towards less memory overhead.
 #ifndef ASAN_LOW_MEMORY
-# define ASAN_LOW_MEMORY 0
+#if SANITIZER_WORDSIZE == 32
+#  define ASAN_LOW_MEMORY 1
+#else
+#  define ASAN_LOW_MEMORY 0
+# endif
 #endif
 
 // All internal functions in asan reside inside the __asan namespace
@@ -108,6 +116,7 @@ bool AsanInterceptsSignal(int signum);
 void SetAlternateSignalStack();
 void UnsetAlternateSignalStack();
 void InstallSignalHandlers();
+void ClearShadowMemoryForContext(void *context);
 void AsanPlatformThreadInit();
 
 // Wrapper for TLS/TSD.
@@ -136,14 +145,19 @@ bool PlatformHasDifferentMemcpyAndMemmove();
 # define PLATFORM_HAS_DIFFERENT_MEMCPY_AND_MEMMOVE true
 #endif  // __APPLE__
 
+// Add convenient macro for interface functions that may be represented as
+// weak hooks.
+#define ASAN_MALLOC_HOOK(ptr, size) \
+  if (&__asan_malloc_hook) __asan_malloc_hook(ptr, size)
+#define ASAN_FREE_HOOK(ptr) \
+  if (&__asan_free_hook) __asan_free_hook(ptr)
+#define ASAN_ON_ERROR() \
+  if (&__asan_on_error) __asan_on_error()
+
 extern int asan_inited;
 // Used to avoid infinite recursion in __asan_init().
 extern bool asan_init_is_running;
 extern void (*death_callback)(void);
-
-#ifdef _WIN32
-bool WinSymbolize(const void *addr, char *out_buffer, int buffer_size);
-#endif  // _WIN32
 
 // These magic values are written to shadow for better error reporting.
 const int kAsanHeapLeftRedzoneMagic = 0xfa;
@@ -156,6 +170,7 @@ const int kAsanStackPartialRedzoneMagic = 0xf4;
 const int kAsanStackAfterReturnMagic = 0xf5;
 const int kAsanInitializationOrderMagic = 0xf6;
 const int kAsanUserPoisonedMemoryMagic = 0xf7;
+const int kAsanStackUseAfterScopeMagic = 0xf8;
 const int kAsanGlobalRedzoneMagic = 0xf9;
 const int kAsanInternalHeapMagic = 0xfe;
 
