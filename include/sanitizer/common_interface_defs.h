@@ -30,6 +30,12 @@
 # define SANITIZER_WEAK_ATTRIBUTE  __attribute__((weak))
 #endif
 
+#ifdef __linux__
+# define SANITIZER_SUPPORTS_WEAK_HOOKS 1
+#else
+# define SANITIZER_SUPPORTS_WEAK_HOOKS 0
+#endif
+
 // __has_feature
 #if !defined(__has_feature)
 # define __has_feature(x) 0
@@ -40,8 +46,21 @@
 // in a portable way by the language itself.
 namespace __sanitizer {
 
+#if defined(_WIN64)
+// 64-bit Windows uses LLP64 data model.
+typedef unsigned long long uptr;  // NOLINT
+typedef signed   long long sptr;  // NOLINT
+#else
 typedef unsigned long uptr;  // NOLINT
 typedef signed   long sptr;  // NOLINT
+#endif  // defined(_WIN64)
+#if defined(__x86_64__)
+// Since x32 uses ILP32 data model in 64-bit hardware mode,  we must use
+// 64-bit pointer to unwind stack frame.
+typedef unsigned long long uhwptr;  // NOLINT
+#else
+typedef uptr uhwptr;   // NOLINT
+#endif
 typedef unsigned char u8;
 typedef unsigned short u16;  // NOLINT
 typedef unsigned int u32;
@@ -52,5 +71,22 @@ typedef signed   int s32;
 typedef signed   long long s64;  // NOLINT
 
 }  // namespace __sanitizer
+
+extern "C" {
+  // Tell the tools to write their reports to "path.<pid>" instead of stderr.
+  void __sanitizer_set_report_path(const char *path)
+      SANITIZER_INTERFACE_ATTRIBUTE;
+
+  // Tell the tools to write their reports to given file descriptor instead of
+  // stderr.
+  void __sanitizer_set_report_fd(int fd)
+      SANITIZER_INTERFACE_ATTRIBUTE;
+
+  // Notify the tools that the sandbox is going to be turned on. The reserved
+  // parameter will be used in the future to hold a structure with functions
+  // that the tools may call to bypass the sandbox.
+  void __sanitizer_sandbox_on_notify(void *reserved)
+      SANITIZER_WEAK_ATTRIBUTE SANITIZER_INTERFACE_ATTRIBUTE;
+}  // extern "C"
 
 #endif  // SANITIZER_COMMON_INTERFACE_DEFS_H
