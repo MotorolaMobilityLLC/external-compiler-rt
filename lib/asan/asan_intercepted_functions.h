@@ -16,6 +16,7 @@
 
 #include "asan_internal.h"
 #include "interception/interception.h"
+#include "sanitizer_common/sanitizer_platform_interceptors.h"
 
 using __sanitizer::uptr;
 
@@ -41,14 +42,22 @@ using __sanitizer::uptr;
 
 #if defined(__linux__)
 # define ASAN_USE_ALIAS_ATTRIBUTE_FOR_INDEX 1
+# define ASAN_INTERCEPT_PRCTL 1
 #else
 # define ASAN_USE_ALIAS_ATTRIBUTE_FOR_INDEX 0
+# define ASAN_INTERCEPT_PRCTL 0
 #endif
 
 #if !defined(__APPLE__)
 # define ASAN_INTERCEPT_STRNLEN 1
 #else
 # define ASAN_INTERCEPT_STRNLEN 0
+#endif
+
+#if defined(__linux__) && !defined(ANDROID)
+# define ASAN_INTERCEPT_SWAPCONTEXT 1
+#else
+# define ASAN_INTERCEPT_SWAPCONTEXT 0
 #endif
 
 #if !defined(ANDROID) && !defined(_WIN32)
@@ -145,10 +154,23 @@ DECLARE_FUNCTION_AND_WRAPPER(long long, atoll, const char *nptr);  // NOLINT
 DECLARE_FUNCTION_AND_WRAPPER(long long, strtoll, const char *nptr, char **endptr, int base);  // NOLINT
 # endif
 
+// unistd.h
+# if SANITIZER_INTERCEPT_READ
+DECLARE_FUNCTION_AND_WRAPPER(SSIZE_T, read, int fd, void *buf, SIZE_T count);
+# endif
+# if SANITIZER_INTERCEPT_PREAD
+DECLARE_FUNCTION_AND_WRAPPER(SSIZE_T, pread, int fd, void *buf,
+                             SIZE_T count, OFF_T offset);
+# endif
+# if SANITIZER_INTERCEPT_PREAD64
+DECLARE_FUNCTION_AND_WRAPPER(SSIZE_T, pread64, int fd, void *buf,
+                             SIZE_T count, OFF64_T offset);
+# endif
+
 # if ASAN_INTERCEPT_MLOCKX
 // mlock/munlock
-DECLARE_FUNCTION_AND_WRAPPER(int, mlock, const void *addr, size_t len);
-DECLARE_FUNCTION_AND_WRAPPER(int, munlock, const void *addr, size_t len);
+DECLARE_FUNCTION_AND_WRAPPER(int, mlock, const void *addr, SIZE_T len);
+DECLARE_FUNCTION_AND_WRAPPER(int, munlock, const void *addr, SIZE_T len);
 DECLARE_FUNCTION_AND_WRAPPER(int, mlockall, int flags);
 DECLARE_FUNCTION_AND_WRAPPER(int, munlockall, void);
 # endif
@@ -199,7 +221,7 @@ DECLARE_FUNCTION_AND_WRAPPER(void, __CFInitialize, void);
 DECLARE_FUNCTION_AND_WRAPPER(CFStringRef, CFStringCreateCopy,
                              CFAllocatorRef alloc, CFStringRef str);
 DECLARE_FUNCTION_AND_WRAPPER(void, free, void* ptr);
-#if MAC_INTERPOSE_FUNCTIONS
+#if MAC_INTERPOSE_FUNCTIONS && !defined(MISSING_BLOCKS_SUPPORT)
 DECLARE_FUNCTION_AND_WRAPPER(void, dispatch_group_async,
                              dispatch_group_t dg,
                              dispatch_queue_t dq, void (^work)(void));

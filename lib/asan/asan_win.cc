@@ -32,7 +32,8 @@ static AsanLock dbghelp_lock(LINKER_INITIALIZED);
 static bool dbghelp_initialized = false;
 #pragma comment(lib, "dbghelp.lib")
 
-void GetStackTrace(StackTrace *stack, uptr max_s, uptr pc, uptr bp) {
+void GetStackTrace(StackTrace *stack, uptr max_s, uptr pc, uptr bp, bool fast) {
+  (void)fast;
   stack->max_size = max_s;
   void *tmp[kStackTraceMax];
 
@@ -53,47 +54,6 @@ void GetStackTrace(StackTrace *stack, uptr max_s, uptr pc, uptr bp) {
   stack->size = cs_ret - offset;
   for (uptr i = 0; i < stack->size; i++)
     stack->trace[i] = (uptr)tmp[i + offset];
-}
-
-bool WinSymbolize(const void *addr, char *out_buffer, int buffer_size) {
-  ScopedLock lock(&dbghelp_lock);
-  if (!dbghelp_initialized) {
-    SymSetOptions(SYMOPT_DEFERRED_LOADS |
-                  SYMOPT_UNDNAME |
-                  SYMOPT_LOAD_LINES);
-    CHECK(SymInitialize(GetCurrentProcess(), 0, TRUE));
-    // FIXME: We don't call SymCleanup() on exit yet - should we?
-    dbghelp_initialized = true;
-  }
-
-  // See http://msdn.microsoft.com/en-us/library/ms680578(VS.85).aspx
-  char buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(CHAR)];
-  PSYMBOL_INFO symbol = (PSYMBOL_INFO)buffer;
-  symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
-  symbol->MaxNameLen = MAX_SYM_NAME;
-  DWORD64 offset = 0;
-  BOOL got_objname = SymFromAddr(GetCurrentProcess(),
-                                 (DWORD64)addr, &offset, symbol);
-  if (!got_objname)
-    return false;
-
-  DWORD  unused;
-  IMAGEHLP_LINE64 info;
-  info.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
-  BOOL got_fileline = SymGetLineFromAddr64(GetCurrentProcess(),
-                                           (DWORD64)addr, &unused, &info);
-  int written = 0;
-  out_buffer[0] = '\0';
-  // FIXME: it might be useful to print out 'obj' or 'obj+offset' info too.
-  if (got_fileline) {
-    written += internal_snprintf(out_buffer + written, buffer_size - written,
-                        " %s %s:%d", symbol->Name,
-                        info.FileName, info.LineNumber);
-  } else {
-    written += internal_snprintf(out_buffer + written, buffer_size - written,
-                        " %s+0x%p", symbol->Name, offset);
-  }
-  return true;
 }
 
 // ---------------------- AsanLock ---------------- {{{1
@@ -180,6 +140,58 @@ void AsanPlatformThreadInit() {
   // Nothing here for now.
 }
 
+void ClearShadowMemoryForContext(void *context) {
+  UNIMPLEMENTED();
+}
+
 }  // namespace __asan
+
+// ---------------------- Interface ---------------- {{{1
+using namespace __asan;  // NOLINT
+
+extern "C" {
+SANITIZER_INTERFACE_ATTRIBUTE NOINLINE
+bool __asan_symbolize(const void *addr, char *out_buffer, int buffer_size) {
+  ScopedLock lock(&dbghelp_lock);
+  if (!dbghelp_initialized) {
+    SymSetOptions(SYMOPT_DEFERRED_LOADS |
+                  SYMOPT_UNDNAME |
+                  SYMOPT_LOAD_LINES);
+    CHECK(SymInitialize(GetCurrentProcess(), 0, TRUE));
+    // FIXME: We don't call SymCleanup() on exit yet - should we?
+    dbghelp_initialized = true;
+  }
+
+  // See http://msdn.microsoft.com/en-us/library/ms680578(VS.85).aspx
+  char buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(CHAR)];
+  PSYMBOL_INFO symbol = (PSYMBOL_INFO)buffer;
+  symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+  symbol->MaxNameLen = MAX_SYM_NAME;
+  DWORD64 offset = 0;
+  BOOL got_objname = SymFromAddr(GetCurrentProcess(),
+                                 (DWORD64)addr, &offset, symbol);
+  if (!got_objname)
+    return false;
+
+  DWORD  unused;
+  IMAGEHLP_LINE64 info;
+  info.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
+  BOOL got_fileline = SymGetLineFromAddr64(GetCurrentProcess(),
+                                           (DWORD64)addr, &unused, &info);
+  int written = 0;
+  out_buffer[0] = '\0';
+  // FIXME: it might be useful to print out 'obj' or 'obj+offset' info too.
+  if (got_fileline) {
+    written += internal_snprintf(out_buffer + written, buffer_size - written,
+                        " %s %s:%d", symbol->Name,
+                        info.FileName, info.LineNumber);
+  } else {
+    written += internal_snprintf(out_buffer + written, buffer_size - written,
+                        " %s+0x%p", symbol->Name, offset);
+  }
+  return true;
+}
+}  // extern "C"
+
 
 #endif  // _WIN32

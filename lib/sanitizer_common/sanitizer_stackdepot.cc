@@ -13,14 +13,15 @@
 
 #include "sanitizer_stackdepot.h"
 #include "sanitizer_common.h"
+#include "sanitizer_internal_defs.h"
 #include "sanitizer_mutex.h"
 #include "sanitizer_atomic.h"
 
 namespace __sanitizer {
 
 const int kTabSize = 1024 * 1024;  // Hash table size.
-const int kPartBits = 10;
-const int kPartShift = sizeof(u32) * 8 - kPartBits;
+const int kPartBits = 8;
+const int kPartShift = sizeof(u32) * 8 - kPartBits - 1;
 const int kPartCount = 1 << kPartBits;  // Number of subparts in the table.
 const int kPartSize = kTabSize / kPartCount;
 const int kMaxId = 1 << kPartShift;
@@ -40,6 +41,12 @@ static struct {
   atomic_uintptr_t tab[kTabSize];  // Hash table of StackDesc's.
   atomic_uint32_t seq[kPartCount];  // Unique id generators.
 } depot;
+
+static StackDepotStats stats;
+
+StackDepotStats *StackDepotGetStats() {
+  return &stats;
+}
 
 static u32 hash(const uptr *stack, uptr size) {
   // murmur2
@@ -76,7 +83,7 @@ static StackDesc *tryallocDesc(uptr memsz) {
 }
 
 static StackDesc *allocDesc(uptr size) {
-  // Frist, try to allocate optimisitically.
+  // First, try to allocate optimisitically.
   uptr memsz = sizeof(StackDesc) + (size - 1) * sizeof(uptr);
   StackDesc *s = tryallocDesc(memsz);
   if (s)
@@ -92,6 +99,7 @@ static StackDesc *allocDesc(uptr size) {
     if (allocsz < memsz)
       allocsz = memsz;
     uptr mem = (uptr)MmapOrDie(allocsz, "stack depot");
+    stats.mapped += allocsz;
     atomic_store(&depot.region_end, mem + allocsz, memory_order_release);
     atomic_store(&depot.region_pos, mem, memory_order_release);
   }
@@ -155,8 +163,11 @@ u32 StackDepotPut(const uptr *stack, uptr size) {
   }
   uptr part = (h % kTabSize) / kPartSize;
   id = atomic_fetch_add(&depot.seq[part], 1, memory_order_relaxed) + 1;
+  stats.n_uniq_ids++;
   CHECK_LT(id, kMaxId);
   id |= part << kPartShift;
+  CHECK_NE(id, 0);
+  CHECK_EQ(id & (1u << 31), 0);
   s = allocDesc(size);
   s->id = id;
   s->hash = h;
@@ -170,6 +181,7 @@ u32 StackDepotPut(const uptr *stack, uptr size) {
 const uptr *StackDepotGet(u32 id, uptr *size) {
   if (id == 0)
     return 0;
+  CHECK_EQ(id & (1u << 31), 0);
   // High kPartBits contain part id, so we need to scan at most kPartSize lists.
   uptr part = id >> kPartShift;
   for (int i = 0; i != kPartSize; i++) {

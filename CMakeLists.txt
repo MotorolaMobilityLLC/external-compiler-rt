@@ -15,6 +15,14 @@ include(LLVMParseArguments)
 # runtime libraries.
 cmake_minimum_required(VERSION 2.8.8)
 
+# Add path for custom modules
+set(CMAKE_MODULE_PATH
+  ${CMAKE_MODULE_PATH}
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules"
+  )
+
+set(COMPILER_RT_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+
 # FIXME: Below we assume that the target build of LLVM/Clang is x86, which is
 # not at all valid. Much of this can be fixed just by switching to use
 # a just-built-clang binary for the compiles.
@@ -32,6 +40,16 @@ else()
   set(TARGET_I386_CFLAGS "-m32")
 endif()
 
+function(get_target_flags_for_arch arch out_var)
+  if(${arch} STREQUAL "x86_64")
+    set(${out_var} ${TARGET_X86_64_CFLAGS} PARENT_SCOPE)
+  elseif(${arch} STREQUAL "i386")
+    set(${out_var} ${TARGET_I386_CFLAGS} PARENT_SCOPE)
+  else()
+    message(FATAL_ERROR "Unsupported architecture: ${arch}")
+  endif()
+endfunction()
+
 # Try to compile a very simple source file to ensure we can target the given
 # platform. We use the results of these tests to build only the various target
 # runtime libraries supported by our current compilers cross-compiling
@@ -48,20 +66,15 @@ try_compile(CAN_TARGET_I386 ${CMAKE_BINARY_DIR} ${SIMPLE_SOURCE32}
             COMPILE_DEFINITIONS "${TARGET_I386_CFLAGS}"
             CMAKE_FLAGS "-DCMAKE_EXE_LINKER_FLAGS:STRING=${TARGET_I386_CFLAGS}")
 
-if(LLVM_ANDROID_TOOLCHAIN_DIR)
-  if(EXISTS ${LLVM_ANDROID_TOOLCHAIN_DIR}/arm-linux-androideabi)
-    set(CAN_TARGET_ARM_ANDROID 1)
-    set(TARGET_ARM_ANDROID_CFLAGS
-      -target arm-linux-androideabi
-      --sysroot=${LLVM_ANDROID_TOOLCHAIN_DIR}/sysroot
-      -B${LLVM_ANDROID_TOOLCHAIN_DIR}
-      )
-  else()
-    set(CAN_TARGET_ARM_ANDROID 0)
-  endif()
-  # TODO: support i686 and MIPS Android toolchains
+# We only support running instrumented tests when we're not cross compiling
+# and target a unix-like system. On Android we define the rules for building
+# unit tests, but don't execute them.
+if("${CMAKE_HOST_SYSTEM}" STREQUAL "${CMAKE_SYSTEM}" AND UNIX AND NOT ANDROID)
+  set(COMPILER_RT_CAN_EXECUTE_TESTS TRUE)
+else()
+  set(COMPILER_RT_CAN_EXECUTE_TESTS FALSE)
 endif()
-
+    
 function(filter_available_targets out_var)
   set(archs)
   foreach(arch ${ARGN})
@@ -81,14 +94,24 @@ set(SANITIZER_COMMON_CFLAGS
   -fno-exceptions
   -fomit-frame-pointer
   -funwind-tables
-  -fvisibility=hidden
   -O3
   )
+if(NOT WIN32)
+  list(APPEND SANITIZER_COMMON_CFLAGS -fvisibility=hidden)
+endif()
+# Build sanitizer runtimes with debug info.
+check_cxx_compiler_flag(-gline-tables-only SUPPORTS_GLINE_TABLES_ONLY_FLAG)
+if(SUPPORTS_GLINE_TABLES_ONLY_FLAG)
+  list(APPEND SANITIZER_COMMON_CFLAGS -gline-tables-only)
+else()
+  list(APPEND SANITIZER_COMMON_CFLAGS -g)
+endif()
+# Warnings suppressions.
+check_cxx_compiler_flag(-Wno-variadic-macros SUPPORTS_NO_VARIADIC_MACROS_FLAG)
 if(SUPPORTS_NO_VARIADIC_MACROS_FLAG)
   list(APPEND SANITIZER_COMMON_CFLAGS -Wno-variadic-macros)
 endif()
-check_cxx_compiler_flag(-Wno-c99-extensions
-  SUPPORTS_NO_C99_EXTENSIONS_FLAG)
+check_cxx_compiler_flag(-Wno-c99-extensions SUPPORTS_NO_C99_EXTENSIONS_FLAG)
 if(SUPPORTS_NO_C99_EXTENSIONS_FLAG)
   list(APPEND SANITIZER_COMMON_CFLAGS -Wno-c99-extensions)
 endif()
@@ -106,11 +129,49 @@ function(set_target_compile_flags target)
   set_property(TARGET ${target} PROPERTY COMPILE_FLAGS "${argstring}")
 endfunction()
 
+function(set_target_link_flags target)
+  foreach(arg ${ARGN})
+    set(argstring "${argstring} ${arg}")
+  endforeach()
+  set_property(TARGET ${target} PROPERTY LINK_FLAGS "${argstring}")
+endfunction()
+
+# Compute the Clang version from the LLVM version.
+# FIXME: We should be able to reuse CLANG_VERSION variable calculated
+#        in Clang cmake files, instead of copying the rules here.
+string(REGEX MATCH "[0-9]+\\.[0-9]+(\\.[0-9]+)?" CLANG_VERSION
+       ${PACKAGE_VERSION})
+# Setup the paths where compiler-rt runtimes and headers should be stored.
+set(LIBCLANG_INSTALL_PATH lib${LLVM_LIBDIR_SUFFIX}/clang/${CLANG_VERSION})
+string(TOLOWER ${CMAKE_SYSTEM_NAME} LIBCLANG_OS_DIR)
+
+# Install compiler-rt headers.
+install(DIRECTORY include/
+  DESTINATION ${LIBCLANG_INSTALL_PATH}/include
+  FILES_MATCHING
+  PATTERN "*.h"
+  PATTERN ".svn" EXCLUDE
+  )
+
+# Call add_clang_compiler_rt_libraries to make sure that targets are built
+# and installed in the directories where Clang driver expects to find them.
+macro(add_clang_compiler_rt_libraries)
+  # Setup output directories so that clang in build tree works.
+  set_target_properties(${ARGN} PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY
+      ${LLVM_BINARY_DIR}/lib/clang/${CLANG_VERSION}/lib/${LIBCLANG_OS_DIR}
+    LIBRARY_OUTPUT_DIRECTORY
+      ${LLVM_BINARY_DIR}/lib/clang/${CLANG_VERSION}/lib/${LIBCLANG_OS_DIR}
+    )
+  # Add installation command.
+  install(TARGETS ${ARGN}
+    ARCHIVE DESTINATION ${LIBCLANG_INSTALL_PATH}/lib/${LIBCLANG_OS_DIR}
+    LIBRARY DESTINATION ${LIBCLANG_INSTALL_PATH}/lib/${LIBCLANG_OS_DIR}
+    )
+endmacro(add_clang_compiler_rt_libraries)
+
 # Add the public header's directory to the includes for all of compiler-rt.
 include_directories(include)
-
-# Build utils before building compiler-rt library.
-add_subdirectory(utils)
 
 add_subdirectory(lib)
 

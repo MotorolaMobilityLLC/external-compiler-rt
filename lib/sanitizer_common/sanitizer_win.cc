@@ -12,6 +12,10 @@
 // sanitizer_libc.h.
 //===----------------------------------------------------------------------===//
 #ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOGDI
+#include <stdlib.h>
+#include <io.h>
 #include <windows.h>
 
 #include "sanitizer_common.h"
@@ -20,6 +24,18 @@
 namespace __sanitizer {
 
 // --------------------- sanitizer_common.h
+uptr GetPageSize() {
+  return 1U << 14;  // FIXME: is this configurable?
+}
+
+uptr GetMmapGranularity() {
+  return 1U << 16;  // FIXME: is this configurable?
+}
+
+bool FileExists(const char *filename) {
+  UNIMPLEMENTED();
+}
+
 int GetPid() {
   return GetProcessId(GetCurrentProcess());
 }
@@ -41,7 +57,6 @@ void GetThreadStackTopAndBottom(bool at_initialization, uptr *stack_top,
   *stack_bottom = (uptr)mbi.AllocationBase;
 }
 
-
 void *MmapOrDie(uptr size, const char *mem_type) {
   void *rv = VirtualAlloc(0, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
   if (rv == 0) {
@@ -61,8 +76,18 @@ void UnmapOrDie(void *addr, uptr size) {
 }
 
 void *MmapFixedNoReserve(uptr fixed_addr, uptr size) {
-  return VirtualAlloc((LPVOID)fixed_addr, size,
-                      MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+  // FIXME: is this really "NoReserve"? On Win32 this does not matter much,
+  // but on Win64 it does.
+  void *p = VirtualAlloc((LPVOID)fixed_addr, size,
+      MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+  if (p == 0)
+    Report("ERROR: Failed to allocate 0x%zx (%zd) bytes at %p (%d)\n",
+           size, size, fixed_addr, GetLastError());
+  return p;
+}
+
+void *MmapFixedOrDie(uptr fixed_addr, uptr size) {
+  return MmapFixedNoReserve(fixed_addr, size);
 }
 
 void *Mprotect(uptr fixed_addr, uptr size) {
@@ -77,7 +102,6 @@ bool MemoryRangeIsAvailable(uptr range_start, uptr range_end) {
 
 void *MapFileToMemory(const char *file_name, uptr *buff_size) {
   UNIMPLEMENTED();
-  return 0;
 }
 
 const char *GetEnv(const char *name) {
@@ -98,7 +122,6 @@ const char *GetEnv(const char *name) {
 
 const char *GetPwd() {
   UNIMPLEMENTED();
-  return 0;
 }
 
 void DumpProcessMap() {
@@ -106,6 +129,22 @@ void DumpProcessMap() {
 }
 
 void DisableCoreDumper() {
+  UNIMPLEMENTED();
+}
+
+void ReExec() {
+  UNIMPLEMENTED();
+}
+
+void PrepareForSandboxing() {
+  // Nothing here for now.
+}
+
+bool StackSizeIsUnlimited() {
+  UNIMPLEMENTED();
+}
+
+void SetStackSizeLimitInBytes(uptr limit) {
   UNIMPLEMENTED();
 }
 
@@ -126,39 +165,40 @@ void Abort() {
   _exit(-1);  // abort is not NORETURN on Windows.
 }
 
+#ifndef SANITIZER_GO
 int Atexit(void (*function)(void)) {
   return atexit(function);
 }
+#endif
 
 // ------------------ sanitizer_libc.h
 void *internal_mmap(void *addr, uptr length, int prot, int flags,
                     int fd, u64 offset) {
   UNIMPLEMENTED();
-  return 0;
 }
 
 int internal_munmap(void *addr, uptr length) {
   UNIMPLEMENTED();
-  return 0;
 }
 
 int internal_close(fd_t fd) {
   UNIMPLEMENTED();
-  return 0;
+}
+
+int internal_isatty(fd_t fd) {
+  return _isatty(fd);
 }
 
 fd_t internal_open(const char *filename, bool write) {
   UNIMPLEMENTED();
-  return 0;
 }
 
 uptr internal_read(fd_t fd, void *buf, uptr count) {
   UNIMPLEMENTED();
-  return 0;
 }
 
 uptr internal_write(fd_t fd, const void *buf, uptr count) {
-  if (fd != 2)
+  if (fd != kStderrFd)
     UNIMPLEMENTED();
   HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
   if (err == 0)
@@ -171,21 +211,18 @@ uptr internal_write(fd_t fd, const void *buf, uptr count) {
 
 uptr internal_filesize(fd_t fd) {
   UNIMPLEMENTED();
-  return 0;
 }
 
 int internal_dup2(int oldfd, int newfd) {
   UNIMPLEMENTED();
-  return 0;
 }
 
 uptr internal_readlink(const char *path, char *buf, uptr bufsize) {
   UNIMPLEMENTED();
-  return 0;
 }
 
 int internal_sched_yield() {
-  UNIMPLEMENTED();
+  Sleep(0);
   return 0;
 }
 

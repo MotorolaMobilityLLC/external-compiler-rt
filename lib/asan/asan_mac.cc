@@ -42,7 +42,7 @@ namespace __asan {
 
 void GetPcSpBp(void *context, uptr *pc, uptr *sp, uptr *bp) {
   ucontext_t *ucontext = (ucontext_t*)context;
-# if __WORDSIZE == 64
+# if SANITIZER_WORDSIZE == 64
   *pc = ucontext->uc_mcontext->__ss.__rip;
   *bp = ucontext->uc_mcontext->__ss.__rbp;
   *sp = ucontext->uc_mcontext->__ss.__rsp;
@@ -50,7 +50,7 @@ void GetPcSpBp(void *context, uptr *pc, uptr *sp, uptr *bp) {
   *pc = ucontext->uc_mcontext->__ss.__eip;
   *bp = ucontext->uc_mcontext->__ss.__ebp;
   *sp = ucontext->uc_mcontext->__ss.__esp;
-# endif  // __WORDSIZE
+# endif  // SANITIZER_WORDSIZE
 }
 
 int GetMacosVersion() {
@@ -68,6 +68,7 @@ int GetMacosVersion() {
       switch (version[1]) {
         case '0': return MACOS_VERSION_SNOW_LEOPARD;
         case '1': return MACOS_VERSION_LION;
+        case '2': return MACOS_VERSION_MOUNTAIN_LION;
         default: return MACOS_VERSION_UNKNOWN;
       }
     }
@@ -96,7 +97,7 @@ void MaybeReexec() {
   // the library is preloaded so that the wrappers work. If it is not, set
   // DYLD_INSERT_LIBRARIES and re-exec ourselves.
   Dl_info info;
-  CHECK(dladdr((void*)__asan_init, &info));
+  CHECK(dladdr((void*)((uptr)__asan_init), &info));
   const char *dyld_insert_libraries = GetEnv(kDyldInsertLibraries);
   if (!dyld_insert_libraries ||
       !REAL(strstr)(dyld_insert_libraries, info.dli_fname)) {
@@ -130,7 +131,14 @@ bool AsanInterceptsSignal(int signum) {
 }
 
 void AsanPlatformThreadInit() {
-  ReplaceCFAllocator();
+  // For the first program thread, we can't replace the allocator before
+  // __CFInitialize() has been called. If it hasn't, we'll call
+  // MaybeReplaceCFAllocator() later on this thread.
+  // For other threads __CFInitialize() has been called before their creation.
+  // See also asan_malloc_mac.cc.
+  if (((CFRuntimeBase*)kCFAllocatorSystemDefault)->_cfisa) {
+    MaybeReplaceCFAllocator();
+  }
 }
 
 AsanLock::AsanLock(LinkerInitialized) {
@@ -152,7 +160,8 @@ void AsanLock::Unlock() {
   OSSpinLockUnlock((OSSpinLock*)&opaque_storage_);
 }
 
-void GetStackTrace(StackTrace *stack, uptr max_s, uptr pc, uptr bp) {
+void GetStackTrace(StackTrace *stack, uptr max_s, uptr pc, uptr bp, bool fast) {
+  (void)fast;
   stack->size = 0;
   stack->trace[0] = pc;
   if ((max_s) > 1) {
@@ -163,6 +172,10 @@ void GetStackTrace(StackTrace *stack, uptr max_s, uptr pc, uptr bp) {
   }
 }
 
+void ClearShadowMemoryForContext(void *context) {
+  UNIMPLEMENTED();
+}
+
 // The range of pages to be used for escape islands.
 // TODO(glider): instead of mapping a fixed range we must find a range of
 // unmapped pages in vmmap and take them.
@@ -171,12 +184,12 @@ void GetStackTrace(StackTrace *stack, uptr max_s, uptr pc, uptr bp) {
 // kHighMemBeg or kHighMemEnd.
 static void *island_allocator_pos = 0;
 
-#if __WORDSIZE == 32
-# define kIslandEnd (0xffdf0000 - kPageSize)
-# define kIslandBeg (kIslandEnd - 256 * kPageSize)
+#if SANITIZER_WORDSIZE == 32
+# define kIslandEnd (0xffdf0000 - GetPageSizeCached())
+# define kIslandBeg (kIslandEnd - 256 * GetPageSizeCached())
 #else
-# define kIslandEnd (0x7fffffdf0000 - kPageSize)
-# define kIslandBeg (kIslandEnd - 256 * kPageSize)
+# define kIslandEnd (0x7fffffdf0000 - GetPageSizeCached())
+# define kIslandBeg (kIslandEnd - 256 * GetPageSizeCached())
 #endif
 
 extern "C"
@@ -200,7 +213,7 @@ mach_error_t __interception_allocate_island(void **ptr,
     internal_memset(island_allocator_pos, 0xCC, kIslandEnd - kIslandBeg);
   };
   *ptr = island_allocator_pos;
-  island_allocator_pos = (char*)island_allocator_pos + kPageSize;
+  island_allocator_pos = (char*)island_allocator_pos + GetPageSizeCached();
   if (flags()->verbosity) {
     Report("Branch island allocated at %p\n", *ptr);
   }
@@ -296,7 +309,7 @@ void asan_register_worker_thread(int parent_tid, StackTrace *stack) {
 // alloc_asan_context().
 extern "C"
 void asan_dispatch_call_block_and_release(void *block) {
-  GET_STACK_TRACE_HERE(kStackTraceMax);
+  GET_STACK_TRACE_THREAD;
   asan_block_context_t *context = (asan_block_context_t*)block;
   if (flags()->verbosity >= 2) {
     Report("asan_dispatch_call_block_and_release(): "
@@ -306,7 +319,7 @@ void asan_dispatch_call_block_and_release(void *block) {
   asan_register_worker_thread(context->parent_tid, &stack);
   // Call the original dispatcher for the block.
   context->func(context->block);
-  asan_free(context, &stack);
+  asan_free(context, &stack, FROM_MALLOC);
 }
 
 }  // namespace __asan
@@ -331,7 +344,7 @@ asan_block_context_t *alloc_asan_context(void *ctxt, dispatch_function_t func,
 #define INTERCEPT_DISPATCH_X_F_3(dispatch_x_f)                                \
   INTERCEPTOR(void, dispatch_x_f, dispatch_queue_t dq, void *ctxt,            \
                                   dispatch_function_t func) {                 \
-    GET_STACK_TRACE_HERE(kStackTraceMax);                                     \
+    GET_STACK_TRACE_THREAD;                                                   \
     asan_block_context_t *asan_ctxt = alloc_asan_context(ctxt, func, &stack); \
     if (flags()->verbosity >= 2) {                                            \
       Report(#dispatch_x_f "(): context: %p, pthread_self: %p\n",             \
@@ -349,7 +362,7 @@ INTERCEPT_DISPATCH_X_F_3(dispatch_barrier_async_f)
 INTERCEPTOR(void, dispatch_after_f, dispatch_time_t when,
                                     dispatch_queue_t dq, void *ctxt,
                                     dispatch_function_t func) {
-  GET_STACK_TRACE_HERE(kStackTraceMax);
+  GET_STACK_TRACE_THREAD;
   asan_block_context_t *asan_ctxt = alloc_asan_context(ctxt, func, &stack);
   if (flags()->verbosity >= 2) {
     Report("dispatch_after_f: %p\n", asan_ctxt);
@@ -362,7 +375,7 @@ INTERCEPTOR(void, dispatch_after_f, dispatch_time_t when,
 INTERCEPTOR(void, dispatch_group_async_f, dispatch_group_t group,
                                           dispatch_queue_t dq, void *ctxt,
                                           dispatch_function_t func) {
-  GET_STACK_TRACE_HERE(kStackTraceMax);
+  GET_STACK_TRACE_THREAD;
   asan_block_context_t *asan_ctxt = alloc_asan_context(ctxt, func, &stack);
   if (flags()->verbosity >= 2) {
     Report("dispatch_group_async_f(): context: %p, pthread_self: %p\n",
@@ -373,7 +386,7 @@ INTERCEPTOR(void, dispatch_group_async_f, dispatch_group_t group,
                                asan_dispatch_call_block_and_release);
 }
 
-#if MAC_INTERPOSE_FUNCTIONS
+#if MAC_INTERPOSE_FUNCTIONS && !defined(MISSING_BLOCKS_SUPPORT)
 // dispatch_async, dispatch_group_async and others tailcall the corresponding
 // dispatch_*_f functions. When wrapping functions with mach_override, those
 // dispatch_*_f are intercepted automatically. But with dylib interposition
@@ -397,7 +410,7 @@ void dispatch_source_set_event_handler(dispatch_source_t ds, void(^work)(void));
   void (^asan_block)(void);  \
   int parent_tid = asanThreadRegistry().GetCurrentTidOrInvalid(); \
   asan_block = ^(void) { \
-    GET_STACK_TRACE_HERE(kStackTraceMax); \
+    GET_STACK_TRACE_THREAD; \
     asan_register_worker_thread(parent_tid, &stack); \
     work(); \
   }
@@ -447,15 +460,15 @@ void *wrap_workitem_func(void *arg) {
   asan_block_context_t *ctxt = (asan_block_context_t*)arg;
   worker_t fn = (worker_t)(ctxt->func);
   void *result =  fn(ctxt->block);
-  GET_STACK_TRACE_HERE(kStackTraceMax);
-  asan_free(arg, &stack);
+  GET_STACK_TRACE_THREAD;
+  asan_free(arg, &stack, FROM_MALLOC);
   return result;
 }
 
 INTERCEPTOR(int, pthread_workqueue_additem_np, pthread_workqueue_t workq,
     void *(*workitem_func)(void *), void * workitem_arg,
     pthread_workitem_handle_t * itemhandlep, unsigned int *gencountp) {
-  GET_STACK_TRACE_HERE(kStackTraceMax);
+  GET_STACK_TRACE_THREAD;
   asan_block_context_t *asan_ctxt =
       (asan_block_context_t*) asan_malloc(sizeof(asan_block_context_t), &stack);
   asan_ctxt->block = workitem_arg;
@@ -491,7 +504,7 @@ INTERCEPTOR(CFStringRef, CFStringCreateCopy, CFAllocatorRef alloc,
 
 DECLARE_REAL_AND_INTERCEPTOR(void, free, void *ptr)
 
-DECLARE_REAL_AND_INTERCEPTOR(void, __CFInitialize)
+DECLARE_REAL_AND_INTERCEPTOR(void, __CFInitialize, void)
 
 namespace __asan {
 
