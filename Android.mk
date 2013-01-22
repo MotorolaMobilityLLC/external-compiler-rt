@@ -34,6 +34,7 @@ LOCAL_CFLAGS += -D__ARM_EABI__
 endif
 # TODO: split out the asflags.
 LOCAL_ASFLAGS := $(LOCAL_CFLAGS)
+LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 
 # Pull in platform-independent functionality
 LOCAL_WHOLE_STATIC_LIBRARIES += libcompiler-rt-builtins libcompiler-rt-extras

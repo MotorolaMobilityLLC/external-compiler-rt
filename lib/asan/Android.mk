@@ -103,6 +103,7 @@ LOCAL_CFLAGS += $(asan_rtl_cflags)
 LOCAL_SRC_FILES := asan_android_stub.cc
 LOCAL_CPP_EXTENSION := .cc
 LOCAL_CLANG := true
+LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include $(BUILD_STATIC_LIBRARY)
 
 
@@ -119,6 +120,7 @@ LOCAL_SRC_FILES := $(asan_rtl_files)
 LOCAL_CPP_EXTENSION := .cc
 LOCAL_SHARED_LIBRARIES := libc libdl
 LOCAL_CLANG := true
+LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include $(BUILD_SHARED_LIBRARY)
 
 
@@ -132,6 +134,7 @@ LOCAL_C_INCLUDES := \
 LOCAL_SRC_FILES := asanwrapper.cc
 LOCAL_CPP_EXTENSION := .cc
 LOCAL_SHARED_LIBRARIES := libstlport libc
+LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 
 include $(BUILD_EXECUTABLE)
 
@@ -157,6 +160,7 @@ LOCAL_CFLAGS += \
 LOCAL_SRC_FILES := tests/asan_noinst_test.cc tests/asan_test_main.cc
 LOCAL_CPP_EXTENSION := .cc
 LOCAL_CLANG := true
+LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include $(BUILD_STATIC_LIBRARY)
 
 
@@ -175,6 +179,7 @@ LOCAL_CPP_EXTENSION := .cc
 LOCAL_STATIC_LIBRARIES := libgtest libasan_noinst_test
 LOCAL_SHARED_LIBRARIES := libc libstlport
 LOCAL_ADDRESS_SANITIZER := true
+LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 
 include $(BUILD_EXECUTABLE)
 
