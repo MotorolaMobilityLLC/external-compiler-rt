@@ -168,8 +168,8 @@ include $(BUILD_STATIC_LIBRARY)
 #=====================================================================
 
 # These are functions that are not available in libgcc.a, so we potentially
-# need them when using a Clang-built component (i.e. -ftrapv with 64-bit
-# integer multiplies).
+# need them when using a Clang-built component (e.g., -ftrapv with 64-bit
+# integer multiplies. See http://llvm.org/bugs/show_bug.cgi?id=14469.)
 include $(CLEAR_VARS)
 
 LOCAL_MODULE := libcompiler-rt-extras
