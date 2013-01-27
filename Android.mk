@@ -353,5 +353,10 @@ include $(BUILD_STATIC_LIBRARY)
 #=====================================================================
 $(eval $(call build-libcompiler-rt,target,static))
 
+#=====================================================================
+# Device Shared Library: libcompiler_rt
+#=====================================================================
+$(eval $(call build-libcompiler-rt,target,shared))
+
 # Build ASan
 include $(LOCAL_PATH)/lib/asan/Android.mk
