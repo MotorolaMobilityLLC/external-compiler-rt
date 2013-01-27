@@ -158,7 +158,10 @@ libcompiler_rt_arm_SRC_FILES := \
   lib/arm/aeabi_memmove.S \
   lib/arm/aeabi_memset.S \
   lib/arm/aeabi_uidivmod.S \
-  lib/arm/aeabi_uldivmod.S \
+  lib/arm/aeabi_uldivmod.S
+
+# ARM-specific runtimes implemented in VFP
+libcompiler_rt_arm_vfp_SRC_FILES := \
   lib/arm/adddf3vfp.S \
   lib/arm/addsf3vfp.S \
   lib/arm/divdf3vfp.S \
@@ -243,7 +246,8 @@ endef
 define get-libcompiler-rt-arm-source-files
   $(call filter-libcompiler-rt-common-source-files,
       $(libcompiler_rt_common_SRC_FILES)
-      $(libcompiler_rt_arm_SRC_FILES),arm)
+      $(libcompiler_rt_arm_SRC_FILES)
+      $(if $(findstring $(ARCH_ARM_HAVE_VFP),true),$(libcompiler_rt_arm_vfp_SRC_FILES),),arm)
 endef
 
 define get-libcompiler-rt-mips-source-files
