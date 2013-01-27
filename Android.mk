@@ -295,7 +295,7 @@ define build-libcompiler-rt
 
   include $(CLEAR_VARS)
 
-  LOCAL_MODULE := libcompiler-rt
+  LOCAL_MODULE := libcompiler_rt
   LOCAL_MODULE_TAGS := optional
 
   ifeq ($$(static_or_shared),static)
@@ -312,7 +312,7 @@ define build-libcompiler-rt
     LOCAL_CFLAGS += -D__ARM_EABI__
   endif
 
-  # Use Clang to compile libcompiler-rt
+  # Use Clang to compile libcompiler_rt
   LOCAL_CLANG := true
   LOCAL_SRC_FILES := $$(call get-libcompiler-rt-source-files,$$(arch))
   LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
@@ -334,12 +334,12 @@ define build-libcompiler-rt
 endef
 
 #=====================================================================
-# Device Static Library: libcompiler-rt-extras
+# Device Static Library: libcompiler_rt-extras
 #=====================================================================
 
 include $(CLEAR_VARS)
 
-LOCAL_MODULE := libcompiler-rt-extras
+LOCAL_MODULE := libcompiler_rt-extras
 LOCAL_MODULE_TAGS := optional
 LOCAL_MODULE_CLASS := STATIC_LIBRARIES
 LOCAL_CLANG := true
@@ -349,7 +349,7 @@ LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include $(BUILD_STATIC_LIBRARY)
 
 #=====================================================================
-# Device Static Library: libcompiler-rt
+# Device Static Library: libcompiler_rt
 #=====================================================================
 $(eval $(call build-libcompiler-rt,target,static))
 
