@@ -103,6 +103,7 @@ libcompiler_rt_common_SRC_FILES := \
   lib/muldc3.c \
   lib/muldf3.c \
   lib/muldi3.c \
+  lib/mulodi4.c \
   lib/mulosi4.c \
   lib/muloti4.c \
   lib/mulsc3.c \
@@ -236,21 +237,18 @@ endef
 define get-libcompiler-rt-arm-source-files
   $(call filter-libcompiler-rt-common-source-files,
       $(libcompiler_rt_common_SRC_FILES)
-      $(libcompiler_rt_extras_SRC_FILES)
       $(libcompiler_rt_arm_SRC_FILES),arm)
 endef
 
 define get-libcompiler-rt-mips-source-files
   $(call filter-libcompiler-rt-common-source-files,
       $(libcompiler_rt_common_SRC_FILES)
-      $(libcompiler_rt_extras_SRC_FILES)
       $(libcompiler_rt_mips_SRC_FILES),mips)
 endef
 
 define get-libcompiler-rt-x86-source-files
   $(call filter-libcompiler-rt-common-source-files,
       $(libcompiler_rt_common_SRC_FILES)
-      $(libcompiler_rt_extras_SRC_FILES)
       $(libcompiler_rt_x86_SRC_FILES),i386)
 endef
 
