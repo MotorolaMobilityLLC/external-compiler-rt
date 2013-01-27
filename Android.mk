@@ -164,8 +164,11 @@ libcompiler_rt_arm_SRC_FILES := \
 libcompiler_rt_arm_vfp_SRC_FILES := \
   lib/arm/adddf3vfp.S \
   lib/arm/addsf3vfp.S \
+  lib/arm/comparesf2.S \
   lib/arm/divdf3vfp.S \
+  lib/arm/divmodsi4.S \
   lib/arm/divsf3vfp.S \
+  lib/arm/divsi3.S \
   lib/arm/eqdf2vfp.S \
   lib/arm/eqsf2vfp.S \
   lib/arm/extendsfdf2vfp.S \
@@ -185,6 +188,7 @@ libcompiler_rt_arm_vfp_SRC_FILES := \
   lib/arm/lesf2vfp.S \
   lib/arm/ltdf2vfp.S \
   lib/arm/ltsf2vfp.S \
+  lib/arm/modsi3.S \
   lib/arm/muldf3vfp.S \
   lib/arm/mulsf3vfp.S \
   lib/arm/nedf2vfp.S \
@@ -194,6 +198,9 @@ libcompiler_rt_arm_vfp_SRC_FILES := \
   lib/arm/subdf3vfp.S \
   lib/arm/subsf3vfp.S \
   lib/arm/truncdfsf2vfp.S \
+  lib/arm/udivmodsi4.S \
+  lib/arm/udivsi3.S \
+  lib/arm/umodsi3.S \
   lib/arm/unorddf2vfp.S \
   lib/arm/unordsf2vfp.S
 
