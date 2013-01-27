@@ -19,6 +19,7 @@ LOCAL_PATH := $(call my-dir)
 
 # The following list contains platform-independent functionalities.
 #
+# Skip apple_versioning.c since it is unused.
 # Skip atomic.c since it needs to be built separately according to the docs.
 # Skip clear_cache.c since it redefines a system function on Android.
 libcompiler_rt_common_SRC_FILES := \
@@ -30,7 +31,6 @@ libcompiler_rt_common_SRC_FILES := \
   lib/addvdi3.c \
   lib/addvsi3.c \
   lib/addvti3.c \
-  lib/apple_versioning.c \
   lib/ashldi3.c \
   lib/ashlti3.c \
   lib/ashrdi3.c \
