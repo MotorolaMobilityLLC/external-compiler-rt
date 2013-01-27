@@ -151,6 +151,14 @@ libcompiler_rt_common_SRC_FILES := \
 
 # ARM-specific runtimes
 libcompiler_rt_arm_SRC_FILES := \
+  lib/arm/aeabi_idivmod.S \
+  lib/arm/aeabi_ldivmod.S \
+  lib/arm/aeabi_memcmp.S \
+  lib/arm/aeabi_memcpy.S \
+  lib/arm/aeabi_memmove.S \
+  lib/arm/aeabi_memset.S \
+  lib/arm/aeabi_uidivmod.S \
+  lib/arm/aeabi_uldivmod.S \
   lib/arm/adddf3vfp.S \
   lib/arm/addsf3vfp.S \
   lib/arm/divdf3vfp.S \
@@ -184,9 +192,7 @@ libcompiler_rt_arm_SRC_FILES := \
   lib/arm/subsf3vfp.S \
   lib/arm/truncdfsf2vfp.S \
   lib/arm/unorddf2vfp.S \
-  lib/arm/unordsf2vfp.S \
-  lib/arm/aeabi_ldivmod.S \
-  lib/arm/aeabi_uldivmod.S
+  lib/arm/unordsf2vfp.S
 
 # MIPS-specific runtimes
 libcompiler_rt_mips_SRC_FILES := # nothing to add
