@@ -312,6 +312,9 @@ define build-libcompiler-rt
     LOCAL_CFLAGS += -D__ARM_EABI__
   endif
 
+  # Use MC assembler to compile assembly
+  LOCAL_ASFLAGS += -integrated-as
+
   # Use Clang to compile libcompiler_rt
   LOCAL_CLANG := true
   LOCAL_SRC_FILES := $$(call get-libcompiler-rt-source-files,$$(arch))
