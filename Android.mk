@@ -151,6 +151,8 @@ libcompiler_rt_common_SRC_FILES := \
 
 # ARM-specific runtimes
 libcompiler_rt_arm_SRC_FILES := \
+  lib/arm/aeabi_dcmp.S \
+  lib/arm/aeabi_fcmp.S \
   lib/arm/aeabi_idivmod.S \
   lib/arm/aeabi_ldivmod.S \
   lib/arm/aeabi_memcmp.S \
