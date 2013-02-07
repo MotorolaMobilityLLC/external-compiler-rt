@@ -158,51 +158,14 @@ libcompiler_rt_arm_SRC_FILES := \
   lib/arm/aeabi_memmove.S \
   lib/arm/aeabi_memset.S \
   lib/arm/aeabi_uidivmod.S \
-  lib/arm/aeabi_uldivmod.S
-
-# ARM-specific runtimes implemented in VFP
-libcompiler_rt_arm_vfp_SRC_FILES := \
-  lib/arm/adddf3vfp.S \
-  lib/arm/addsf3vfp.S \
+  lib/arm/aeabi_uldivmod.S \
   lib/arm/comparesf2.S \
-  lib/arm/divdf3vfp.S \
   lib/arm/divmodsi4.S \
-  lib/arm/divsf3vfp.S \
   lib/arm/divsi3.S \
-  lib/arm/eqdf2vfp.S \
-  lib/arm/eqsf2vfp.S \
-  lib/arm/extendsfdf2vfp.S \
-  lib/arm/fixdfsivfp.S \
-  lib/arm/fixsfsivfp.S \
-  lib/arm/fixunsdfsivfp.S \
-  lib/arm/fixunssfsivfp.S \
-  lib/arm/floatsidfvfp.S \
-  lib/arm/floatsisfvfp.S \
-  lib/arm/floatunssidfvfp.S \
-  lib/arm/floatunssisfvfp.S \
-  lib/arm/gedf2vfp.S \
-  lib/arm/gesf2vfp.S \
-  lib/arm/gtdf2vfp.S \
-  lib/arm/gtsf2vfp.S \
-  lib/arm/ledf2vfp.S \
-  lib/arm/lesf2vfp.S \
-  lib/arm/ltdf2vfp.S \
-  lib/arm/ltsf2vfp.S \
   lib/arm/modsi3.S \
-  lib/arm/muldf3vfp.S \
-  lib/arm/mulsf3vfp.S \
-  lib/arm/nedf2vfp.S \
-  lib/arm/negdf2vfp.S \
-  lib/arm/negsf2vfp.S \
-  lib/arm/nesf2vfp.S \
-  lib/arm/subdf3vfp.S \
-  lib/arm/subsf3vfp.S \
-  lib/arm/truncdfsf2vfp.S \
   lib/arm/udivmodsi4.S \
   lib/arm/udivsi3.S \
-  lib/arm/umodsi3.S \
-  lib/arm/unorddf2vfp.S \
-  lib/arm/unordsf2vfp.S
+  lib/arm/umodsi3.S
 
 # MIPS-specific runtimes
 libcompiler_rt_mips_SRC_FILES := # nothing to add
@@ -250,11 +213,29 @@ define filter-libcompiler-rt-common-source-files
   $(filter-out $(patsubst lib/$(2)/%.S,lib/%.c,$(filter %.S,$(1))),$(1))
 endef
 
-define get-libcompiler-rt-arm-source-files
+define get-libcompiler-rt-arm-common-source-files
   $(call filter-libcompiler-rt-common-source-files,
       $(libcompiler_rt_common_SRC_FILES)
-      $(libcompiler_rt_arm_SRC_FILES)
-      $(if $(findstring $(ARCH_ARM_HAVE_VFP),true),$(libcompiler_rt_arm_vfp_SRC_FILES),),arm)
+      $(libcompiler_rt_arm_SRC_FILES), arm)
+endef
+
+# $(1): common runtime list
+#
+# Add ARM runtimes implemented in VFP
+define add-libcompiler-rt-arm-vfp-source-files
+  $(filter-out $(addprefix lib/,adddf3.c addsf3.c comparedf2.c comparesf2.c         \
+                                arm/comparesf2.S divdf3.c divsf3.c extendsfdf2.c    \
+                                fixdfsi.c fixsfsi.c fixunsdfsi.c fixunssfsi.c       \
+                                floatsidf.c floatsisf.c floatunsidf.c floatunsisf.c \
+                                muldf3.c mulsf3.c negdf2.c negsf2.c subdf3.c        \
+                                subsf3.c truncdfsf2.c),$(1)) lib/arm/vfp_alias.S
+endef
+
+define get-libcompiler-rt-arm-source-files
+  $(if $(findstring $(ARCH_ARM_HAVE_VFP),true),
+      $(call add-libcompiler-rt-arm-vfp-source-files,
+          $(call get-libcompiler-rt-arm-common-source-files)),
+      $(call get-libcompiler-rt-arm-common-source-files))
 endef
 
 define get-libcompiler-rt-mips-source-files
