@@ -212,12 +212,12 @@ endef
 # in the result source list (i.e., use the one optimized for the arch.) Otherwise
 # there'll be multiple definitions for one symbol.
 define filter-libcompiler-rt-common-source-files
-  $(filter-out $(patsubst lib/$(2)/%.S,lib/%.c,$(filter %.S,$(1))),$(1))
+  $(filter-out $(patsubst lib/$(strip $(2))/%.S,lib/%.c,$(filter %.S,$(1))),$(1))
 endef
 
 define get-libcompiler-rt-arm-common-source-files
   $(call filter-libcompiler-rt-common-source-files,
-      $(libcompiler_rt_common_SRC_FILES)
+      $(libcompiler_rt_common_SRC_FILES) \
       $(libcompiler_rt_arm_SRC_FILES), arm)
 endef
 
@@ -242,13 +242,13 @@ endef
 
 define get-libcompiler-rt-mips-source-files
   $(call filter-libcompiler-rt-common-source-files,
-      $(libcompiler_rt_common_SRC_FILES)
+      $(libcompiler_rt_common_SRC_FILES) \
       $(libcompiler_rt_mips_SRC_FILES),mips)
 endef
 
 define get-libcompiler-rt-x86-source-files
   $(call filter-libcompiler-rt-common-source-files,
-      $(libcompiler_rt_common_SRC_FILES)
+      $(libcompiler_rt_common_SRC_FILES) \
       $(libcompiler_rt_x86_SRC_FILES),i386)
 endef
 
