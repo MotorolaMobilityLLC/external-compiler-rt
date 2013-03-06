@@ -58,7 +58,9 @@ static THREADLOCAL struct {
   uptr stack_top, stack_bottom;
 } __msan_stack_bounds;
 
-extern const int __msan_track_origins;
+static THREADLOCAL bool is_in_symbolizer;
+
+extern "C" const int __msan_track_origins;
 int __msan_get_track_origins() {
   return __msan_track_origins;
 }
@@ -81,6 +83,10 @@ static bool IsRunningUnderDr() {
   return result;
 }
 
+void EnterSymbolizer() { is_in_symbolizer = true; }
+void ExitSymbolizer()  { is_in_symbolizer = false; }
+bool IsInSymbolizer() { return is_in_symbolizer; }
+
 static Flags msan_flags;
 
 Flags *flags() {
@@ -89,6 +95,8 @@ Flags *flags() {
 
 int msan_inited = 0;
 bool msan_init_is_running;
+
+int msan_report_count = 0;
 
 // Array of stack origins.
 // FIXME: make it resizable.
@@ -109,6 +117,7 @@ static void ParseFlagsFromString(Flags *f, const char *str) {
   ParseFlag(str, &f->num_callers, "num_callers");
   ParseFlag(str, &f->report_umrs, "report_umrs");
   ParseFlag(str, &f->verbosity, "verbosity");
+  ParseFlag(str, &f->strip_path_prefix, "strip_path_prefix");
 }
 
 static void InitializeFlags(Flags *f, const char *options) {
@@ -121,7 +130,11 @@ static void InitializeFlags(Flags *f, const char *options) {
   f->num_callers = 20;
   f->report_umrs = true;
   f->verbosity = 0;
+  f->strip_path_prefix = "";
 
+  // Override from user-specified string.
+  if (__msan_default_options)
+    ParseFlagsFromString(f, __msan_default_options());
   ParseFlagsFromString(f, options);
 }
 
@@ -138,7 +151,11 @@ static void GetCurrentStackBounds(uptr *stack_top, uptr *stack_bottom) {
   *stack_bottom = __msan_stack_bounds.stack_bottom;
 }
 
-void GetStackTrace(StackTrace *stack, uptr max_s, uptr pc, uptr bp) {
+void GetStackTrace(StackTrace *stack, uptr max_s, uptr pc, uptr bp,
+                   bool fast) {
+  if (!fast)
+    return stack->SlowUnwindStack(pc, max_s);
+
   uptr stack_top, stack_bottom;
   GetCurrentStackBounds(&stack_top, &stack_bottom);
   stack->size = 0;
@@ -163,8 +180,10 @@ void PrintWarningWithOrigin(uptr pc, uptr bp, u32 origin) {
     return;
   }
 
+  ++msan_report_count;
+
   StackTrace stack;
-  GetStackTrace(&stack, kStackTraceMax, pc, bp);
+  GetStackTrace(&stack, kStackTraceMax, pc, bp, /*fast*/false);
 
   u32 report_origin =
     (__msan_track_origins && OriginIsValid(origin)) ? origin : 0;
@@ -176,7 +195,6 @@ void PrintWarningWithOrigin(uptr pc, uptr bp, u32 origin) {
            origin);
   }
 }
-
 
 }  // namespace __msan
 
@@ -201,11 +219,15 @@ void __msan_warning_noreturn() {
 void __msan_init() {
   if (msan_inited) return;
   msan_init_is_running = 1;
+  SanitizerToolName = "MemorySanitizer";
 
+  InstallAtExitHandler();
   SetDieCallback(MsanDie);
   InitializeInterceptors();
 
   ReplaceOperatorsNewAndDelete();
+  const char *msan_options = GetEnv("MSAN_OPTIONS");
+  InitializeFlags(&msan_flags, msan_options);
   if (StackSizeIsUnlimited()) {
     if (flags()->verbosity)
       Printf("Unlimited stack, doing reexec\n");
@@ -214,10 +236,10 @@ void __msan_init() {
     SetStackSizeLimitInBytes(32 * 1024 * 1024);
     ReExec();
   }
-  const char *msan_options = GetEnv("MSAN_OPTIONS");
-  InitializeFlags(&msan_flags, msan_options);
+
   if (flags()->verbosity)
     Printf("MSAN_OPTIONS: %s\n", msan_options ? msan_options : "<empty>");
+
   msan_running_under_dr = IsRunningUnderDr();
   __msan_clear_on_return();
   if (__msan_track_origins && flags()->verbosity > 0)
@@ -233,8 +255,6 @@ void __msan_init() {
     DumpProcessMap();
     Die();
   }
-
-  InstallTrapHandler();
 
   const char *external_symbolizer = GetEnv("MSAN_SYMBOLIZER_PATH");
   if (external_symbolizer && external_symbolizer[0]) {
@@ -261,7 +281,7 @@ void __msan_set_expect_umr(int expect_umr) {
     GET_CALLER_PC_BP_SP;
     (void)sp;
     StackTrace stack;
-    GetStackTrace(&stack, kStackTraceMax, pc, bp);
+    GetStackTrace(&stack, kStackTraceMax, pc, bp, /*fast*/false);
     ReportExpectedUMRNotFound(&stack);
     Die();
   }
@@ -303,8 +323,6 @@ int __msan_set_poison_in_malloc(int do_poison) {
   flags()->poison_in_malloc = do_poison;
   return old;
 }
-
-void __msan_break_optimization(void *x) { }
 
 int  __msan_has_dynamic_component() {
   return msan_running_under_dr;
@@ -411,6 +429,14 @@ u32 __msan_get_origin(void *a) {
   return *(u32*)origin_ptr;
 }
 
-u32 __msan_get_origin_tls() {
+u32 __msan_get_umr_origin() {
   return __msan_origin_tls;
 }
+
+#if !SANITIZER_SUPPORTS_WEAK_HOOKS
+extern "C" {
+SANITIZER_WEAK_ATTRIBUTE SANITIZER_INTERFACE_ATTRIBUTE
+const char* __msan_default_options() { return ""; }
+}  // extern "C"
+#endif
+

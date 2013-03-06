@@ -1,5 +1,4 @@
 include(CompilerRTCompile)
-include(CompilerRTUnittests)
 
 set(SANITIZER_UNITTESTS
   sanitizer_allocator_test.cc
@@ -7,8 +6,11 @@ set(SANITIZER_UNITTESTS
   sanitizer_flags_test.cc
   sanitizer_libc_test.cc
   sanitizer_list_test.cc
+  sanitizer_mutex_test.cc
   sanitizer_printf_test.cc
+  sanitizer_scanf_interceptor_test.cc
   sanitizer_stackdepot_test.cc
+  sanitizer_stacktrace_test.cc
   sanitizer_test_main.cc
   )
 
@@ -52,7 +54,7 @@ macro(add_sanitizer_tests_for_arch arch)
                             -I${COMPILER_RT_SOURCE_DIR}/include
                             -I${COMPILER_RT_SOURCE_DIR}/lib
                             -I${COMPILER_RT_SOURCE_DIR}/lib/sanitizer_common
-                            -O2 -g ${TARGET_FLAGS})
+                            -O2 -g -Wall -Werror ${TARGET_FLAGS})
   set(SANITIZER_TEST_LINK_FLAGS -lstdc++ -lpthread ${TARGET_FLAGS})
   set(SANITIZER_TEST_OBJECTS)
   foreach(source ${SANITIZER_TEST_SOURCES})
@@ -82,19 +84,19 @@ if(COMPILER_RT_CAN_EXECUTE_TESTS)
     add_sanitizer_common_lib("RTSanitizerCommon.test.osx"
                              $<TARGET_OBJECTS:RTSanitizerCommon.osx>)
   else()
-    if(CAN_TARGET_X86_64)
+    if(CAN_TARGET_x86_64)
       add_sanitizer_common_lib("RTSanitizerCommon.test.x86_64"
                                $<TARGET_OBJECTS:RTSanitizerCommon.x86_64>)
     endif()
-    if(CAN_TARGET_I386)
+    if(CAN_TARGET_i386)
       add_sanitizer_common_lib("RTSanitizerCommon.test.i386"
                                $<TARGET_OBJECTS:RTSanitizerCommon.i386>)
     endif()
   endif()
-  if(CAN_TARGET_X86_64)
+  if(CAN_TARGET_x86_64)
     add_sanitizer_tests_for_arch(x86_64)
   endif()
-  if(CAN_TARGET_I386)
+  if(CAN_TARGET_i386)
     add_sanitizer_tests_for_arch(i386)
   endif()
 
@@ -109,4 +111,28 @@ if(COMPILER_RT_CAN_EXECUTE_TESTS)
     DEPENDS SanitizerUnitTests
     )
   set_target_properties(check-sanitizer PROPERTIES FOLDER "Sanitizer unittests")
+endif()
+
+if(ANDROID)
+  # We assume that unit tests on Android are built in a build
+  # tree with fresh Clang as a host compiler.
+  add_executable(SanitizerTest
+    ${SANITIZER_UNITTESTS}
+    ${COMPILER_RT_GTEST_SOURCE}
+    $<TARGET_OBJECTS:RTSanitizerCommon.arm.android>
+    )
+  set_target_compile_flags(SanitizerTest
+    ${SANITIZER_COMMON_CFLAGS}
+    ${COMPILER_RT_GTEST_INCLUDE_CFLAGS}
+    -I${COMPILER_RT_SOURCE_DIR}/include
+    -I${COMPILER_RT_SOURCE_DIR}/lib
+    -I${COMPILER_RT_SOURCE_DIR}/lib/sanitizer_common
+    -O2 -g
+    )
+  # Setup correct output directory and link flags.
+  set_target_properties(SanitizerTest PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+  set_target_link_flags(SanitizerTest ${SANITIZER_TEST_LINK_FLAGS})
+  # Add unit test to test suite.
+  add_dependencies(SanitizerUnitTests SanitizerTest)
 endif()

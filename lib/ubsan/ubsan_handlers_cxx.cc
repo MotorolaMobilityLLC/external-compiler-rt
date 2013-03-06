@@ -33,12 +33,15 @@ static void HandleDynamicTypeCacheMiss(
     // Just a cache miss. The type matches after all.
     return;
 
-  Diag(Data->Loc, DL_Error,
+  SourceLocation Loc = Data->Loc.acquire();
+  if (Loc.isDisabled())
+    return;
+
+  Diag(Loc, DL_Error,
        "%0 address %1 which does not point to an object of type %2")
     << TypeCheckKinds[Data->TypeCheckKind] << (void*)Pointer << Data->Type;
 
   // If possible, say what type it actually points to.
-  // FIXME: Demangle the type names.
   DynamicTypeInfo DTI = getDynamicTypeInfo((void*)Pointer);
   if (!DTI.isValid())
     Diag(Pointer, DL_Note, "object has invalid vptr")
