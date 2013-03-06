@@ -17,7 +17,6 @@
 #include "asan_mapping.h"
 #include "asan_stack.h"
 #include "asan_test_utils.h"
-#include "sanitizer/asan_interface.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -25,14 +24,7 @@
 #include <string.h>  // for memset()
 #include <algorithm>
 #include <vector>
-
-// Simple stand-alone pseudorandom number generator.
-// Current algorithm is ANSI C linear congruential PRNG.
-static inline u32 my_rand(u32* state) {
-  return (*state = *state * 1103515245 + 12345) >> 16;
-}
-
-static u32 global_seed = 0;
+#include <limits>
 
 
 TEST(AddressSanitizer, InternalSimpleDeathTest) {
@@ -40,7 +32,7 @@ TEST(AddressSanitizer, InternalSimpleDeathTest) {
 }
 
 static void MallocStress(size_t n) {
-  u32 seed = my_rand(&global_seed);
+  u32 seed = my_rand();
   __asan::StackTrace stack1;
   stack1.trace[0] = 0xa123;
   stack1.trace[1] = 0xa456;
@@ -60,19 +52,19 @@ static void MallocStress(size_t n) {
   for (size_t i = 0; i < n; i++) {
     if ((i % 3) == 0) {
       if (vec.empty()) continue;
-      size_t idx = my_rand(&seed) % vec.size();
+      size_t idx = my_rand_r(&seed) % vec.size();
       void *ptr = vec[idx];
       vec[idx] = vec.back();
       vec.pop_back();
       __asan::asan_free(ptr, &stack1, __asan::FROM_MALLOC);
     } else {
-      size_t size = my_rand(&seed) % 1000 + 1;
-      switch ((my_rand(&seed) % 128)) {
+      size_t size = my_rand_r(&seed) % 1000 + 1;
+      switch ((my_rand_r(&seed) % 128)) {
         case 0: size += 1024; break;
         case 1: size += 2048; break;
         case 2: size += 4096; break;
       }
-      size_t alignment = 1 << (my_rand(&seed) % 10 + 1);
+      size_t alignment = 1 << (my_rand_r(&seed) % 10 + 1);
       char *ptr = (char*)__asan::asan_memalign(alignment, size,
                                                &stack2, __asan::FROM_MALLOC);
       vec.push_back(ptr);
@@ -209,7 +201,7 @@ static uptr pc_array[] = {
 };
 
 void CompressStackTraceTest(size_t n_iter) {
-  u32 seed = my_rand(&global_seed);
+  u32 seed = my_rand();
   const size_t kNumPcs = ARRAY_SIZE(pc_array);
   u32 compressed[2 * kNumPcs];
 
@@ -217,9 +209,9 @@ void CompressStackTraceTest(size_t n_iter) {
     std::random_shuffle(pc_array, pc_array + kNumPcs);
     __asan::StackTrace stack0, stack1;
     stack0.CopyFrom(pc_array, kNumPcs);
-    stack0.size = std::max((size_t)1, (size_t)(my_rand(&seed) % stack0.size));
+    stack0.size = std::max((size_t)1, (size_t)(my_rand_r(&seed) % stack0.size));
     size_t compress_size =
-      std::max((size_t)2, (size_t)my_rand(&seed) % (2 * kNumPcs));
+      std::max((size_t)2, (size_t)my_rand_r(&seed) % (2 * kNumPcs));
     size_t n_frames =
       __asan::StackTrace::CompressStack(&stack0, compressed, compress_size);
     Ident(n_frames);
@@ -278,13 +270,13 @@ TEST(AddressSanitizer, QuarantineTest) {
 
 void *ThreadedQuarantineTestWorker(void *unused) {
   (void)unused;
-  u32 seed = my_rand(&global_seed);
+  u32 seed = my_rand();
   __asan::StackTrace stack;
   stack.trace[0] = 0x890;
   stack.size = 1;
 
   for (size_t i = 0; i < 1000; i++) {
-    void *p = __asan::asan_malloc(1 + (my_rand(&seed) % 4000), &stack);
+    void *p = __asan::asan_malloc(1 + (my_rand_r(&seed) % 4000), &stack);
     __asan::asan_free(p, &stack, __asan::FROM_MALLOC);
   }
   return NULL;
@@ -334,11 +326,13 @@ TEST(AddressSanitizer, ThreadedOneSizeMallocStressTest) {
 }
 
 TEST(AddressSanitizer, MemsetWildAddressTest) {
+  using __asan::kHighMemEnd;
   typedef void*(*memset_p)(void*, int, size_t);
   // Prevent inlining of memset().
   volatile memset_p libc_memset = (memset_p)memset;
   EXPECT_DEATH(libc_memset((void*)(kLowShadowBeg + 200), 0, 100),
-               "unknown-crash.*low shadow");
+               (kLowShadowEnd == 0) ? "unknown-crash.*shadow gap"
+                                    : "unknown-crash.*low shadow");
   EXPECT_DEATH(libc_memset((void*)(kShadowGapBeg + 200), 0, 100),
                "unknown-crash.*shadow gap");
   EXPECT_DEATH(libc_memset((void*)(kHighShadowBeg + 200), 0, 100),
@@ -390,8 +384,17 @@ TEST(AddressSanitizerInterface, GetAllocatedSizeAndOwnershipTest) {
   free(array);
   EXPECT_FALSE(__asan_get_ownership(array));
   EXPECT_DEATH(__asan_get_allocated_size(array), kGetAllocatedSizeErrorMsg);
-
   delete int_ptr;
+
+  void *zero_alloc = Ident(malloc(0));
+  if (zero_alloc != 0) {
+    // If malloc(0) is not null, this pointer is owned and should have valid
+    // allocated size.
+    EXPECT_TRUE(__asan_get_ownership(zero_alloc));
+    // Allocated size is 0 or 1 depending on the allocator used.
+    EXPECT_LT(__asan_get_allocated_size(zero_alloc), 2U);
+  }
+  free(zero_alloc);
 }
 
 TEST(AddressSanitizerInterface, GetCurrentAllocatedBytesTest) {
@@ -630,6 +633,53 @@ TEST(AddressSanitizerInterface, PushAndPopWithPoisoningTest) {
   free(vec);
 }
 
+TEST(AddressSanitizerInterface, GlobalRedzones) {
+  GOOD_ACCESS(glob1, 1 - 1);
+  GOOD_ACCESS(glob2, 2 - 1);
+  GOOD_ACCESS(glob3, 3 - 1);
+  GOOD_ACCESS(glob4, 4 - 1);
+  GOOD_ACCESS(glob5, 5 - 1);
+  GOOD_ACCESS(glob6, 6 - 1);
+  GOOD_ACCESS(glob7, 7 - 1);
+  GOOD_ACCESS(glob8, 8 - 1);
+  GOOD_ACCESS(glob9, 9 - 1);
+  GOOD_ACCESS(glob10, 10 - 1);
+  GOOD_ACCESS(glob11, 11 - 1);
+  GOOD_ACCESS(glob12, 12 - 1);
+  GOOD_ACCESS(glob13, 13 - 1);
+  GOOD_ACCESS(glob14, 14 - 1);
+  GOOD_ACCESS(glob15, 15 - 1);
+  GOOD_ACCESS(glob16, 16 - 1);
+  GOOD_ACCESS(glob17, 17 - 1);
+  GOOD_ACCESS(glob1000, 1000 - 1);
+  GOOD_ACCESS(glob10000, 10000 - 1);
+  GOOD_ACCESS(glob100000, 100000 - 1);
+
+  BAD_ACCESS(glob1, 1);
+  BAD_ACCESS(glob2, 2);
+  BAD_ACCESS(glob3, 3);
+  BAD_ACCESS(glob4, 4);
+  BAD_ACCESS(glob5, 5);
+  BAD_ACCESS(glob6, 6);
+  BAD_ACCESS(glob7, 7);
+  BAD_ACCESS(glob8, 8);
+  BAD_ACCESS(glob9, 9);
+  BAD_ACCESS(glob10, 10);
+  BAD_ACCESS(glob11, 11);
+  BAD_ACCESS(glob12, 12);
+  BAD_ACCESS(glob13, 13);
+  BAD_ACCESS(glob14, 14);
+  BAD_ACCESS(glob15, 15);
+  BAD_ACCESS(glob16, 16);
+  BAD_ACCESS(glob17, 17);
+  BAD_ACCESS(glob1000, 1000);
+  BAD_ACCESS(glob1000, 1100);  // Redzone is at least 101 bytes.
+  BAD_ACCESS(glob10000, 10000);
+  BAD_ACCESS(glob10000, 11000);  // Redzone is at least 1001 bytes.
+  BAD_ACCESS(glob100000, 100000);
+  BAD_ACCESS(glob100000, 110000);  // Redzone is at least 10001 bytes.
+}
+
 // Make sure that each aligned block of size "2^granularity" doesn't have
 // "true" value before "false" value.
 static void MakeShadowValid(bool *shadow, int length, int granularity) {
@@ -714,10 +764,19 @@ TEST(AddressSanitizerInterface, PoisonedRegion) {
 //     10.50%   [.] __sanitizer::mem_is_zero
 // I.e. mem_is_zero should consume ~ SHADOW_GRANULARITY less CPU cycles
 // than memset itself.
-TEST(AddressSanitizerInterface, DISABLED_Stress_memset) {
+TEST(AddressSanitizerInterface, DISABLED_StressLargeMemset) {
   size_t size = 1 << 20;
   char *x = new char[size];
   for (int i = 0; i < 100000; i++)
+    Ident(memset)(x, 0, size);
+  delete [] x;
+}
+
+// Same here, but we run memset with small sizes.
+TEST(AddressSanitizerInterface, DISABLED_StressSmallMemset) {
+  size_t size = 32;
+  char *x = new char[size];
+  for (int i = 0; i < 100000000; i++)
     Ident(memset)(x, 0, size);
   delete [] x;
 }
@@ -780,4 +839,21 @@ TEST(AddressSanitizerInterface, GetOwnershipStressTest) {
   }
   for (size_t i = 0, n = pointers.size(); i < n; i++)
     free(pointers[i]);
+}
+
+TEST(AddressSanitizerInterface, CallocOverflow) {
+  size_t kArraySize = 4096;
+  volatile size_t kMaxSizeT = std::numeric_limits<size_t>::max();
+  volatile size_t kArraySize2 = kMaxSizeT / kArraySize + 10;
+  void *p = calloc(kArraySize, kArraySize2);  // Should return 0.
+  EXPECT_EQ(0L, Ident(p));
+}
+
+TEST(AddressSanitizerInterface, CallocOverflow2) {
+#if SANITIZER_WORDSIZE == 32
+  size_t kArraySize = 112;
+  volatile size_t kArraySize2 = 43878406;
+  void *p = calloc(kArraySize, kArraySize2);  // Should return 0.
+  EXPECT_EQ(0L, Ident(p));
+#endif
 }

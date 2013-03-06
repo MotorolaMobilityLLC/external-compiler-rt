@@ -48,6 +48,7 @@ struct ReportMop {
   uptr addr;
   int size;
   bool write;
+  bool atomic;
   Vector<ReportMopMutex> mset;
   ReportStack *stack;
 
@@ -58,6 +59,7 @@ enum ReportLocationType {
   ReportLocationGlobal,
   ReportLocationHeap,
   ReportLocationStack,
+  ReportLocationTLS,
   ReportLocationFD
 };
 
