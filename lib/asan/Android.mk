@@ -52,6 +52,7 @@ asan_rtl_files := \
 	../sanitizer_common/sanitizer_linux.cc \
 	../sanitizer_common/sanitizer_mac.cc \
 	../sanitizer_common/sanitizer_posix.cc \
+	../sanitizer_common/sanitizer_platform_limits_posix.cc \
 	../sanitizer_common/sanitizer_printf.cc \
 	../sanitizer_common/sanitizer_stackdepot.cc \
 	../sanitizer_common/sanitizer_stacktrace.cc \
@@ -100,7 +101,8 @@ LOCAL_MODULE := libasan
 LOCAL_MODULE_TAGS := optional
 LOCAL_C_INCLUDES := bionic external/compiler-rt/lib external/compiler-rt/include
 LOCAL_CFLAGS += $(asan_rtl_cflags)
-LOCAL_SRC_FILES := asan_android_stub.cc
+LOCAL_SRC_FILES := asan_preinit.cc
+#LOCAL_SRC_FILES := asan_android_stub.cc asan_preinit.cc
 LOCAL_CPP_EXTENSION := .cc
 LOCAL_CLANG := true
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
@@ -148,7 +150,9 @@ LOCAL_C_INCLUDES := \
         external/stlport/stlport \
         external/gtest/include \
         external/compiler-rt/include \
-        external/compiler-rt/lib
+        external/compiler-rt/lib \
+	external/compiler-rt/lib/asan/tests \
+	external/compiler-rt/lib/sanitizer_common/tests
 LOCAL_CFLAGS += \
         -Wno-unused-parameter \
         -Wno-sign-compare \
@@ -172,7 +176,9 @@ LOCAL_C_INCLUDES := \
         bionic \
         external/stlport/stlport \
         external/gtest/include \
-        external/compiler-rt/lib
+        external/compiler-rt/lib \
+	external/compiler-rt/lib/asan/tests \
+	external/compiler-rt/lib/sanitizer_common/tests
 LOCAL_CFLAGS += $(asan_test_cflags)
 LOCAL_SRC_FILES := $(asan_test_files)
 LOCAL_CPP_EXTENSION := .cc
