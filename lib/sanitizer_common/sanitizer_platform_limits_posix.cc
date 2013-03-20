@@ -18,6 +18,7 @@
 #include "sanitizer_platform_limits_posix.h"
 
 #include <dirent.h>
+#include <pthread.h>
 #include <sys/utsname.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -46,6 +47,7 @@ namespace __sanitizer {
 #endif // __linux__
 
 #if defined(__linux__) && !defined(__ANDROID__)
+  unsigned struct_dirent64_sz = sizeof(struct dirent64);
   unsigned struct_rlimit64_sz = sizeof(struct rlimit64);
   unsigned struct_statfs64_sz = sizeof(struct statfs64);
 #endif // __linux__ && !__ANDROID__
@@ -66,5 +68,7 @@ namespace __sanitizer {
     return *(socklen_t*)socklen_ptr;
   }
 }  // namespace __sanitizer
+
+COMPILER_CHECK(sizeof(__sanitizer_pthread_attr_t) >= sizeof(pthread_attr_t));
 
 #endif  // __linux__ || __APPLE__

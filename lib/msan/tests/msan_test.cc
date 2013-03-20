@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <assert.h>
 #include <wchar.h>
+#include <math.h>
 
 #include <dlfcn.h>
 #include <unistd.h>
@@ -34,6 +35,8 @@
 #include <sys/utsname.h>
 #include <sys/mman.h>
 #include <sys/vfs.h>
+#include <sys/types.h>
+#include <dirent.h>
 
 #if defined(__i386__) || defined(__x86_64__)
 # include <emmintrin.h>
@@ -612,6 +615,14 @@ TEST(MemorySanitizer, getcwd_gnu) {
   free(res);
 }
 
+TEST(MemorySanitizer, readdir) {
+  DIR *dir = opendir(".");
+  struct dirent *d = readdir(dir);
+  assert(d);
+  EXPECT_NOT_POISONED(d->d_name[0]);
+  closedir(dir);
+}
+
 TEST(MemorySanitizer, realpath) {
   const char* relpath = ".";
   char path[PATH_MAX + 1];
@@ -641,10 +652,38 @@ TEST(MemorySanitizer, memmove) {
 }
 
 TEST(MemorySanitizer, strdup) {
-  char *x = strdup("zzz");
-  EXPECT_NOT_POISONED(*x);
+  char buf[4] = "abc";
+  __msan_poison(buf + 2, sizeof(*buf));
+  char *x = strdup(buf);
+  EXPECT_NOT_POISONED(x[0]);
+  EXPECT_NOT_POISONED(x[1]);
+  EXPECT_POISONED(x[2]);
+  EXPECT_NOT_POISONED(x[3]);
   free(x);
 }
+
+TEST(MemorySanitizer, strndup) {
+  char buf[4] = "abc";
+  __msan_poison(buf + 2, sizeof(*buf));
+  char *x = strndup(buf, 3);
+  EXPECT_NOT_POISONED(x[0]);
+  EXPECT_NOT_POISONED(x[1]);
+  EXPECT_POISONED(x[2]);
+  EXPECT_NOT_POISONED(x[3]);
+  free(x);
+}
+
+TEST(MemorySanitizer, strndup_short) {
+  char buf[4] = "abc";
+  __msan_poison(buf + 1, sizeof(*buf));
+  __msan_poison(buf + 2, sizeof(*buf));
+  char *x = strndup(buf, 2);
+  EXPECT_NOT_POISONED(x[0]);
+  EXPECT_POISONED(x[1]);
+  EXPECT_NOT_POISONED(x[2]);
+  free(x);
+}
+
 
 template<class T, int size>
 void TestOverlapMemmove() {
@@ -858,6 +897,24 @@ TEST(MemorySanitizer, fcvt) {
   char *str = fcvt(12345.6789, 10, &a, &b);
   EXPECT_NOT_POISONED(a);
   EXPECT_NOT_POISONED(b);
+}
+
+TEST(MemorySanitizer, frexp) {
+  int x;
+  x = *GetPoisoned<int>();
+  double r = frexp(1.1, &x);
+  EXPECT_NOT_POISONED(r);
+  EXPECT_NOT_POISONED(x);
+
+  x = *GetPoisoned<int>();
+  float rf = frexpf(1.1, &x);
+  EXPECT_NOT_POISONED(rf);
+  EXPECT_NOT_POISONED(x);
+
+  x = *GetPoisoned<int>();
+  double rl = frexpl(1.1, &x);
+  EXPECT_NOT_POISONED(rl);
+  EXPECT_NOT_POISONED(x);
 }
 
 struct StructWithDtor {
@@ -1288,6 +1345,55 @@ TEST(MemorySanitizer, dladdr) {
   EXPECT_NOT_POISONED((unsigned long)info.dli_saddr);
 }
 
+#ifdef __GLIBC__
+extern "C" {
+  extern void *__libc_stack_end;
+}
+
+static char **GetArgv(void) {
+  uintptr_t *stack_end = (uintptr_t *)__libc_stack_end;
+  return (char**)(stack_end + 1);
+}
+
+#else  // __GLIBC__
+# error "TODO: port this"
+#endif
+
+TEST(MemorySanitizer, dlopen) {
+  // Compute the path to our loadable DSO.  We assume it's in the same
+  // directory.  Only use string routines that we intercept so far to do this.
+  char **argv = GetArgv();
+  const char *basename = "libmsan_loadable.x86_64.so";
+  size_t path_max = strlen(argv[0]) + 1 + strlen(basename) + 1;
+  char *path = new char[path_max];
+  char *last_slash = strrchr(argv[0], '/');
+  assert(last_slash);
+  snprintf(path, path_max, "%.*s/%s", int(last_slash - argv[0]),
+           argv[0], basename);
+
+  // We need to clear shadow for globals when doing dlopen.  In order to test
+  // this, we have to poison the shadow for the DSO before we load it.  In
+  // general this is difficult, but the loader tends to reload things in the
+  // same place, so we open, close, and then reopen.  The global should always
+  // start out clean after dlopen.
+  for (int i = 0; i < 2; i++) {
+    void *lib = dlopen(path, RTLD_LAZY);
+    if (lib == NULL) {
+      printf("dlerror: %s\n", dlerror());
+      assert(lib != NULL);
+    }
+    void **(*get_dso_global)() = (void **(*)())dlsym(lib, "get_dso_global");
+    assert(get_dso_global);
+    void **dso_global = get_dso_global();
+    EXPECT_NOT_POISONED(*dso_global);
+    __msan_poison(dso_global, sizeof(*dso_global));
+    EXPECT_POISONED(*dso_global);
+    dlclose(lib);
+  }
+
+  delete[] path;
+}
+
 TEST(MemorySanitizer, scanf) {
   const char *input = "42 hello";
   int* d = new int;
@@ -1321,6 +1427,27 @@ TEST(MemorySanitizer, SimpleThread) {
   if (!__msan_has_dynamic_component())  // FIXME: intercept pthread_join (?).
     __msan_unpoison(&p, sizeof(p));
   delete (int*)p;
+}
+
+static void* SmallStackThread_threadfn(void* data) {
+  return 0;
+}
+
+TEST(MemorySanitizer, SmallStackThread) {
+  pthread_attr_t attr;
+  pthread_t t;
+  void* p;
+  int res;
+  res = pthread_attr_init(&attr);
+  ASSERT_EQ(0, res);
+  res = pthread_attr_setstacksize(&attr, 64 * 1024);
+  ASSERT_EQ(0, res);
+  res = pthread_create(&t, &attr, SimpleThread_threadfn, NULL);
+  ASSERT_EQ(0, res);
+  res = pthread_join(t, &p);
+  ASSERT_EQ(0, res);
+  res = pthread_attr_destroy(&attr);
+  ASSERT_EQ(0, res);
 }
 
 TEST(MemorySanitizer, uname) {
