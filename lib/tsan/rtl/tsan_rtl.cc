@@ -47,12 +47,28 @@ Context *CTX() {
   return ctx;
 }
 
+static char thread_registry_placeholder[sizeof(ThreadRegistry)];
+
+static ThreadContextBase *CreateThreadContext(u32 tid) {
+  // Map thread trace when context is created.
+  MapThreadTrace(GetThreadTrace(tid), TraceSize() * sizeof(Event));
+  void *mem = MmapOrDie(sizeof(ThreadContext), "ThreadContext");
+  return new(mem) ThreadContext(tid);
+}
+
+#ifndef TSAN_GO
+static const u32 kThreadQuarantineSize = 16;
+#else
+static const u32 kThreadQuarantineSize = 64;
+#endif
+
 Context::Context()
   : initialized()
   , report_mtx(MutexTypeReport, StatMtxReport)
   , nreported()
   , nmissed_expected()
-  , thread_mtx(MutexTypeThreads, StatMtxThreads)
+  , thread_registry(new(thread_registry_placeholder) ThreadRegistry(
+      CreateThreadContext, kMaxTid, kThreadQuarantineSize))
   , racy_stacks(MBlockRacyStacks)
   , racy_addresses(MBlockRacyAddresses)
   , fired_suppressions(MBlockRacyAddresses) {
@@ -77,61 +93,19 @@ ThreadState::ThreadState(Context *ctx, int tid, int unique_id, u64 epoch,
   , tls_size(tls_size) {
 }
 
-ThreadContext::ThreadContext(int tid)
-  : tid(tid)
-  , unique_id()
-  , os_id()
-  , user_id()
-  , thr()
-  , status(ThreadStatusInvalid)
-  , detached()
-  , reuse_count()
-  , epoch0()
-  , epoch1()
-  , dead_info()
-  , dead_next()
-  , name() {
-}
-
-static void WriteMemoryProfile(char *buf, uptr buf_size, int num) {
-  uptr shadow = GetShadowMemoryConsumption();
-
-  int nthread = 0;
-  int nlivethread = 0;
-  uptr threadmem = 0;
-  {
-    Lock l(&ctx->thread_mtx);
-    for (unsigned i = 0; i < kMaxTid; i++) {
-      ThreadContext *tctx = ctx->threads[i];
-      if (tctx == 0)
-        continue;
-      nthread += 1;
-      threadmem += sizeof(ThreadContext);
-      if (tctx->status != ThreadStatusRunning)
-        continue;
-      nlivethread += 1;
-      threadmem += sizeof(ThreadState);
-    }
-  }
-
-  uptr nsync = 0;
-  uptr syncmem = CTX()->synctab.GetMemoryConsumption(&nsync);
-
-  internal_snprintf(buf, buf_size, "%d: shadow=%zuMB"
-                                   " thread=%zuMB(total=%d/live=%d)"
-                                   " sync=%zuMB(cnt=%zu)\n",
-    num,
-    shadow >> 20,
-    threadmem >> 20, nthread, nlivethread,
-    syncmem >> 20, nsync);
-}
-
 static void MemoryProfileThread(void *arg) {
   ScopedInRtl in_rtl;
   fd_t fd = (fd_t)(uptr)arg;
+  Context *ctx = CTX();
   for (int i = 0; ; i++) {
     InternalScopedBuffer<char> buf(4096);
-    WriteMemoryProfile(buf.data(), buf.size(), i);
+    uptr n_threads;
+    uptr n_running_threads;
+    ctx->thread_registry->GetNumberOfThreads(&n_threads, &n_running_threads);
+    internal_snprintf(buf.data(), buf.size(), "%d: nthr=%d nlive=%d\n",
+        i, n_threads, n_running_threads);
+    internal_write(fd, buf.data(), internal_strlen(buf.data()));
+    WriteMemoryProfile(buf.data(), buf.size());
     internal_write(fd, buf.data(), internal_strlen(buf.data()));
     SleepForSeconds(1);
   }
@@ -149,6 +123,12 @@ static void InitializeMemoryProfile() {
     Die();
   }
   internal_start_thread(&MemoryProfileThread, (void*)(uptr)fd);
+}
+
+void DontNeedShadowFor(uptr addr, uptr size) {
+  uptr shadow_beg = MemToShadow(addr);
+  uptr shadow_end = MemToShadow(addr + size);
+  FlushUnneededShadowMemory(shadow_beg, shadow_end - shadow_beg);
 }
 
 static void MemoryFlushThread(void *arg) {
@@ -203,9 +183,6 @@ void Initialize(ThreadState *thr) {
 #ifndef TSAN_GO
   InitializeShadowMemory();
 #endif
-  ctx->dead_list_size = 0;
-  ctx->dead_list_head = 0;
-  ctx->dead_list_tail = 0;
   InitializeFlags(&ctx->flags, env);
   // Setup correct file descriptor for error reports.
   if (internal_strcmp(flags()->log_path, "stdout") == 0)
@@ -234,7 +211,6 @@ void Initialize(ThreadState *thr) {
                GetPid());
 
   // Initialize thread 0.
-  ctx->thread_seq = 0;
   int tid = ThreadCreate(thr, 0, 0, true);
   CHECK_EQ(tid, 0);
   ThreadStart(thr, tid, GetPid());
@@ -494,6 +470,8 @@ void MemoryAccess(ThreadState *thr, uptr pc, uptr addr,
 
 static void MemoryRangeSet(ThreadState *thr, uptr pc, uptr addr, uptr size,
                            u64 val) {
+  (void)thr;
+  (void)pc;
   if (size == 0)
     return;
   // FIXME: fix me.
@@ -510,23 +488,42 @@ static void MemoryRangeSet(ThreadState *thr, uptr pc, uptr addr, uptr size,
   // let it just crash as usual.
   if (!IsAppMem(addr) || !IsAppMem(addr + size - 1))
     return;
-  (void)thr;
-  (void)pc;
-  // Some programs mmap like hundreds of GBs but actually used a small part.
-  // So, it's better to report a false positive on the memory
-  // then to hang here senselessly.
-  const uptr kMaxResetSize = 4ull*1024*1024*1024;
-  if (size > kMaxResetSize)
-    size = kMaxResetSize;
+  // Don't want to touch lots of shadow memory.
+  // If a program maps 10MB stack, there is no need reset the whole range.
   size = (size + (kShadowCell - 1)) & ~(kShadowCell - 1);
-  u64 *p = (u64*)MemToShadow(addr);
-  CHECK(IsShadowMem((uptr)p));
-  CHECK(IsShadowMem((uptr)(p + size * kShadowCnt / kShadowCell - 1)));
-  // FIXME: may overwrite a part outside the region
-  for (uptr i = 0; i < size * kShadowCnt / kShadowCell;) {
-    p[i++] = val;
-    for (uptr j = 1; j < kShadowCnt; j++)
-      p[i++] = 0;
+  if (size < 64*1024) {
+    u64 *p = (u64*)MemToShadow(addr);
+    CHECK(IsShadowMem((uptr)p));
+    CHECK(IsShadowMem((uptr)(p + size * kShadowCnt / kShadowCell - 1)));
+    // FIXME: may overwrite a part outside the region
+    for (uptr i = 0; i < size / kShadowCell * kShadowCnt;) {
+      p[i++] = val;
+      for (uptr j = 1; j < kShadowCnt; j++)
+        p[i++] = 0;
+    }
+  } else {
+    // The region is big, reset only beginning and end.
+    const uptr kPageSize = 4096;
+    u64 *begin = (u64*)MemToShadow(addr);
+    u64 *end = begin + size / kShadowCell * kShadowCnt;
+    u64 *p = begin;
+    // Set at least first kPageSize/2 to page boundary.
+    while ((p < begin + kPageSize / kShadowSize / 2) || ((uptr)p % kPageSize)) {
+      *p++ = val;
+      for (uptr j = 1; j < kShadowCnt; j++)
+        *p++ = 0;
+    }
+    // Reset middle part.
+    u64 *p1 = p;
+    p = RoundDown(end, kPageSize);
+    UnmapOrDie((void*)p1, (uptr)p - (uptr)p1);
+    MmapFixedNoReserve((uptr)p1, (uptr)p - (uptr)p1);
+    // Set the ending.
+    while (p < end) {
+      *p++ = val;
+      for (uptr j = 1; j < kShadowCnt; j++)
+        *p++ = 0;
+    }
   }
 }
 
@@ -535,6 +532,11 @@ void MemoryResetRange(ThreadState *thr, uptr pc, uptr addr, uptr size) {
 }
 
 void MemoryRangeFreed(ThreadState *thr, uptr pc, uptr addr, uptr size) {
+  // Processing more than 1k (4k of shadow) is expensive,
+  // can cause excessive memory consumption (user does not necessary touch
+  // the whole range) and most likely unnecessary.
+  if (size > 1024)
+    size = 1024;
   CHECK_EQ(thr->is_freeing, false);
   thr->is_freeing = true;
   MemoryAccessRange(thr, pc, addr, size, true);

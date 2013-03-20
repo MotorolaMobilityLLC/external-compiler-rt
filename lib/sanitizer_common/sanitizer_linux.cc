@@ -16,15 +16,19 @@
 #include "sanitizer_common.h"
 #include "sanitizer_internal_defs.h"
 #include "sanitizer_libc.h"
+#include "sanitizer_linux.h"
 #include "sanitizer_mutex.h"
 #include "sanitizer_placement_new.h"
 #include "sanitizer_procmaps.h"
 #include "sanitizer_stacktrace.h"
 
+#include <dlfcn.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <sched.h>
 #include <sys/mman.h>
+#include <sys/ptrace.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -33,7 +37,10 @@
 #include <sys/prctl.h>
 #include <unistd.h>
 #include <unwind.h>
-#include <errno.h>
+
+#if !defined(__ANDROID__) && !defined(ANDROID)
+#include <sys/signal.h>
+#endif
 
 // <linux/futex.h> is broken on some linux distributions.
 const int FUTEX_WAIT = 0;
@@ -178,7 +185,7 @@ void GetThreadStackTopAndBottom(bool at_initialization, uptr *stack_top,
     MemoryMappingLayout proc_maps;
     uptr start, end, offset;
     uptr prev_end = 0;
-    while (proc_maps.Next(&start, &end, &offset, 0, 0)) {
+    while (proc_maps.Next(&start, &end, &offset, 0, 0, /* protection */0)) {
       if ((uptr)&rl < end)
         break;
       prev_end = end;
@@ -375,7 +382,7 @@ static uptr ParseHex(char **str) {
   return x;
 }
 
-static bool IsOnOf(char c, char c1, char c2) {
+static bool IsOneOf(char c, char c1, char c2) {
   return c == c1 || c == c2;
 }
 
@@ -384,7 +391,8 @@ static bool IsDecimal(char c) {
 }
 
 bool MemoryMappingLayout::Next(uptr *start, uptr *end, uptr *offset,
-                               char filename[], uptr filename_size) {
+                               char filename[], uptr filename_size,
+                               uptr *protection) {
   char *last = proc_self_maps_.data + proc_self_maps_.len;
   if (current_ >= last) return false;
   uptr dummy;
@@ -399,10 +407,22 @@ bool MemoryMappingLayout::Next(uptr *start, uptr *end, uptr *offset,
   CHECK_EQ(*current_++, '-');
   *end = ParseHex(&current_);
   CHECK_EQ(*current_++, ' ');
-  CHECK(IsOnOf(*current_++, '-', 'r'));
-  CHECK(IsOnOf(*current_++, '-', 'w'));
-  CHECK(IsOnOf(*current_++, '-', 'x'));
-  CHECK(IsOnOf(*current_++, 's', 'p'));
+  uptr local_protection = 0;
+  CHECK(IsOneOf(*current_, '-', 'r'));
+  if (*current_++ == 'r')
+    local_protection |= kProtectionRead;
+  CHECK(IsOneOf(*current_, '-', 'w'));
+  if (*current_++ == 'w')
+    local_protection |= kProtectionWrite;
+  CHECK(IsOneOf(*current_, '-', 'x'));
+  if (*current_++ == 'x')
+    local_protection |= kProtectionExecute;
+  CHECK(IsOneOf(*current_, 's', 'p'));
+  if (*current_++ == 's')
+    local_protection |= kProtectionShared;
+  if (protection) {
+    *protection = local_protection;
+  }
   CHECK_EQ(*current_++, ' ');
   *offset = ParseHex(&current_);
   CHECK_EQ(*current_++, ' ');
@@ -432,8 +452,10 @@ bool MemoryMappingLayout::Next(uptr *start, uptr *end, uptr *offset,
 // Gets the object name and the offset by walking MemoryMappingLayout.
 bool MemoryMappingLayout::GetObjectNameAndOffset(uptr addr, uptr *offset,
                                                  char filename[],
-                                                 uptr filename_size) {
-  return IterateForObjectNameAndOffset(addr, offset, filename, filename_size);
+                                                 uptr filename_size,
+                                                 uptr *protection) {
+  return IterateForObjectNameAndOffset(addr, offset, filename, filename_size,
+                                       protection);
 }
 
 bool SanitizerSetThreadName(const char *name) {
@@ -523,6 +545,10 @@ BlockingMutex::BlockingMutex(LinkerInitialized) {
   CHECK_EQ(owner_, 0);
 }
 
+BlockingMutex::BlockingMutex() {
+  internal_memset(this, 0, sizeof(*this));
+}
+
 void BlockingMutex::Lock() {
   atomic_uint32_t *m = reinterpret_cast<atomic_uint32_t *>(&opaque_storage_);
   if (atomic_exchange(m, MtxLocked, memory_order_acquire) == MtxUnlocked)
@@ -537,6 +563,147 @@ void BlockingMutex::Unlock() {
   CHECK_NE(v, MtxUnlocked);
   if (v == MtxSleeping)
     syscall(__NR_futex, m, FUTEX_WAKE, 1, 0, 0, 0);
+}
+
+void BlockingMutex::CheckLocked() {
+  atomic_uint32_t *m = reinterpret_cast<atomic_uint32_t *>(&opaque_storage_);
+  CHECK_NE(MtxUnlocked, atomic_load(m, memory_order_relaxed));
+}
+
+// ----------------- sanitizer_linux.h
+// The actual size of this structure is specified by d_reclen.
+// Note that getdents64 uses a different structure format. We only provide the
+// 32-bit syscall here.
+struct linux_dirent {
+  unsigned long      d_ino;
+  unsigned long      d_off;
+  unsigned short     d_reclen;
+  char               d_name[256];
+};
+
+// Syscall wrappers.
+long internal_ptrace(int request, int pid, void *addr, void *data) {
+  return syscall(__NR_ptrace, request, pid, addr, data);
+}
+
+int internal_waitpid(int pid, int *status, int options) {
+  return syscall(__NR_wait4, pid, status, options, NULL /* rusage */);
+}
+
+int internal_getppid() {
+  return syscall(__NR_getppid);
+}
+
+int internal_getdents(fd_t fd, struct linux_dirent *dirp, unsigned int count) {
+  return syscall(__NR_getdents, fd, dirp, count);
+}
+
+OFF_T internal_lseek(fd_t fd, OFF_T offset, int whence) {
+  return syscall(__NR_lseek, fd, offset, whence);
+}
+
+int internal_prctl(int option, uptr arg2, uptr arg3, uptr arg4, uptr arg5) {
+  return syscall(__NR_prctl, option, arg2, arg3, arg4, arg5);
+}
+
+int internal_sigaltstack(const struct sigaltstack *ss,
+                         struct sigaltstack *oss) {
+  return syscall(__NR_sigaltstack, ss, oss);
+}
+
+
+// ThreadLister implementation.
+ThreadLister::ThreadLister(int pid)
+  : pid_(pid),
+    descriptor_(-1),
+    error_(true),
+    entry_((linux_dirent *)buffer_),
+    bytes_read_(0) {
+  char task_directory_path[80];
+  internal_snprintf(task_directory_path, sizeof(task_directory_path),
+                    "/proc/%d/task/", pid);
+  descriptor_ = internal_open(task_directory_path, O_RDONLY | O_DIRECTORY);
+  if (descriptor_ < 0) {
+    error_ = true;
+    Report("Can't open /proc/%d/task for reading.\n", pid);
+  } else {
+    error_ = false;
+  }
+}
+
+int ThreadLister::GetNextTID() {
+  int tid = -1;
+  do {
+    if (error_)
+      return -1;
+    if ((char *)entry_ >= &buffer_[bytes_read_] && !GetDirectoryEntries())
+      return -1;
+    if (entry_->d_ino != 0 && entry_->d_name[0] >= '0' &&
+        entry_->d_name[0] <= '9') {
+      // Found a valid tid.
+      tid = (int)internal_atoll(entry_->d_name);
+    }
+    entry_ = (struct linux_dirent *)(((char *)entry_) + entry_->d_reclen);
+  } while (tid < 0);
+  return tid;
+}
+
+void ThreadLister::Reset() {
+  if (error_ || descriptor_ < 0)
+    return;
+  internal_lseek(descriptor_, 0, SEEK_SET);
+}
+
+ThreadLister::~ThreadLister() {
+  if (descriptor_ >= 0)
+    internal_close(descriptor_);
+}
+
+bool ThreadLister::error() { return error_; }
+
+bool ThreadLister::GetDirectoryEntries() {
+  CHECK_GE(descriptor_, 0);
+  CHECK_NE(error_, true);
+  bytes_read_ = internal_getdents(descriptor_,
+                                  (struct linux_dirent *)buffer_,
+                                  sizeof(buffer_));
+  if (bytes_read_ < 0) {
+    Report("Can't read directory entries from /proc/%d/task.\n", pid_);
+    error_ = true;
+    return false;
+  } else if (bytes_read_ == 0) {
+    return false;
+  }
+  entry_ = (struct linux_dirent *)buffer_;
+  return true;
+}
+
+static uptr g_tls_size;
+
+#ifdef __i386__
+# define DL_INTERNAL_FUNCTION __attribute__((regparm(3), stdcall))
+#else
+# define DL_INTERNAL_FUNCTION
+#endif
+
+void InitTlsSize() {
+#ifndef SANITIZER_GO
+  typedef void (*get_tls_func)(size_t*, size_t*) DL_INTERNAL_FUNCTION;
+  get_tls_func get_tls;
+  void *get_tls_static_info_ptr = dlsym(RTLD_NEXT, "_dl_get_tls_static_info");
+  CHECK_EQ(sizeof(get_tls), sizeof(get_tls_static_info_ptr));
+  internal_memcpy(&get_tls, &get_tls_static_info_ptr,
+                  sizeof(get_tls_static_info_ptr));
+  CHECK_NE(get_tls, 0);
+  size_t tls_size = 0;
+  size_t tls_align = 0;
+  get_tls(&tls_size, &tls_align);
+  g_tls_size = tls_size;
+#endif
+}
+
+uptr GetTlsSize() {
+  return g_tls_size;
 }
 
 }  // namespace __sanitizer

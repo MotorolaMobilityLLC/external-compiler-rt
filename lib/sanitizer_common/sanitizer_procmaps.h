@@ -24,7 +24,8 @@ class MemoryMappingLayout {
  public:
   MemoryMappingLayout() {}
   bool GetObjectNameAndOffset(uptr addr, uptr *offset,
-                              char filename[], uptr filename_size) {
+                              char filename[], uptr filename_size,
+                              uptr *protection) {
     UNIMPLEMENTED();
   }
 };
@@ -42,17 +43,24 @@ class MemoryMappingLayout {
  public:
   MemoryMappingLayout();
   bool Next(uptr *start, uptr *end, uptr *offset,
-            char filename[], uptr filename_size);
+            char filename[], uptr filename_size, uptr *protection);
   void Reset();
   // Gets the object file name and the offset in that object for a given
   // address 'addr'. Returns true on success.
   bool GetObjectNameAndOffset(uptr addr, uptr *offset,
-                              char filename[], uptr filename_size);
+                              char filename[], uptr filename_size,
+                              uptr *protection);
   // In some cases, e.g. when running under a sandbox on Linux, ASan is unable
   // to obtain the memory mappings. It should fall back to pre-cached data
   // instead of aborting.
   static void CacheMemoryMappings();
   ~MemoryMappingLayout();
+
+  // Memory protection masks.
+  static const uptr kProtectionRead = 1;
+  static const uptr kProtectionWrite = 2;
+  static const uptr kProtectionExecute = 4;
+  static const uptr kProtectionShared = 8;
 
  private:
   void LoadFromCache();
@@ -60,10 +68,12 @@ class MemoryMappingLayout {
   // Quite slow, because it iterates through the whole process map for each
   // lookup.
   bool IterateForObjectNameAndOffset(uptr addr, uptr *offset,
-                                     char filename[], uptr filename_size) {
+                                     char filename[], uptr filename_size,
+                                     uptr *protection) {
     Reset();
     uptr start, end, file_offset;
-    for (int i = 0; Next(&start, &end, &file_offset, filename, filename_size);
+    for (int i = 0; Next(&start, &end, &file_offset, filename, filename_size,
+                         protection);
          i++) {
       if (addr >= start && addr < end) {
         // Don't subtract 'start' for the first entry:
@@ -96,7 +106,8 @@ class MemoryMappingLayout {
 # elif defined __APPLE__
   template<u32 kLCSegment, typename SegmentCommand>
   bool NextSegmentLoad(uptr *start, uptr *end, uptr *offset,
-                       char filename[], uptr filename_size);
+                       char filename[], uptr filename_size,
+                       uptr *protection);
   int current_image_;
   u32 current_magic_;
   u32 current_filetype_;

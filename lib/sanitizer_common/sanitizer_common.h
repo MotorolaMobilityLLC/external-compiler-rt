@@ -33,6 +33,7 @@ const uptr kCacheLineSize = 64;
 #endif
 
 extern const char *SanitizerToolName;  // Can be changed by the tool.
+extern uptr SanitizerVerbosity;
 
 uptr GetPageSize();
 uptr GetPageSizeCached();
@@ -132,6 +133,9 @@ void ReExec();
 bool StackSizeIsUnlimited();
 void SetStackSizeLimitInBytes(uptr limit);
 void PrepareForSandboxing();
+
+void InitTlsSize();
+uptr GetTlsSize();
 
 // Other
 void SleepForSeconds(int seconds);
@@ -286,6 +290,14 @@ class InternalVector {
       Resize(new_capacity);
     }
     data_[size_++] = element;
+  }
+  T &back() {
+    CHECK_GT(size_, 0);
+    return data_[size_ - 1];
+  }
+  void pop_back() {
+    CHECK_GT(size_, 0);
+    size_--;
   }
   uptr size() {
     return size_;
