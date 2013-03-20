@@ -127,18 +127,21 @@ static void ParseFlagsFromString(Flags *f, const char *str) {
   ParseFlag(str, &f->poison_heap, "poison_heap");
   ParseFlag(str, &f->alloc_dealloc_mismatch, "alloc_dealloc_mismatch");
   ParseFlag(str, &f->use_stack_depot, "use_stack_depot");
+  ParseFlag(str, &f->strict_memcmp, "strict_memcmp");
 }
+
+static const char *asan_external_symbolizer;
 
 void InitializeFlags(Flags *f, const char *env) {
   internal_memset(f, 0, sizeof(*f));
 
   f->quarantine_size = (ASAN_LOW_MEMORY) ? 1UL << 26 : 1UL << 28;
-  f->symbolize = false;
+  f->symbolize = (asan_external_symbolizer != 0);
   f->verbosity = 0;
   f->redzone = ASAN_ALLOCATOR_VERSION == 2 ? 16 : (ASAN_LOW_MEMORY) ? 64 : 128;
   f->debug = false;
   f->report_globals = 1;
-  f->check_initialization_order = true;
+  f->check_initialization_order = false;
   f->malloc_context_size = kDeafultMallocContextSize;
   f->replace_str = true;
   f->replace_intrin = true;
@@ -168,6 +171,7 @@ void InitializeFlags(Flags *f, const char *env) {
   // TODO(glider): Fix known issues and enable this back.
   f->alloc_dealloc_mismatch = (ASAN_MAC == 0);;
   f->use_stack_depot = true;  // Only affects allocator2.
+  f->strict_memcmp = true;
 
   // Override from compile definition.
   ParseFlagsFromString(f, MaybeUseAsanDefaultOptionsCompileDefiniton());
@@ -424,6 +428,8 @@ void __asan_init() {
   SetCheckFailedCallback(AsanCheckFailed);
   SetPrintfAndReportCallback(AppendToErrorMessageBuffer);
 
+  // Check if external symbolizer is defined before parsing the flags.
+  asan_external_symbolizer = GetEnv("ASAN_SYMBOLIZER_PATH");
   // Initialize flags. This must be done early, because most of the
   // initialization steps look at flags().
   const char *options = GetEnv("ASAN_OPTIONS");
@@ -459,7 +465,7 @@ void __asan_init() {
 #if ASAN_LINUX && defined(__x86_64__) && !ASAN_FIXED_MAPPING
   if (!full_shadow_is_available) {
     kMidMemBeg = kLowMemEnd < 0x3000000000ULL ? 0x3000000000ULL : 0;
-    kMidMemEnd = kLowMemEnd < 0x3000000000ULL ? 0x3fffffffffULL : 0;
+    kMidMemEnd = kLowMemEnd < 0x3000000000ULL ? 0x4fffffffffULL : 0;
   }
 #endif
 
@@ -501,11 +507,9 @@ void __asan_init() {
 
   InstallSignalHandlers();
   // Start symbolizer process if necessary.
-  if (flags()->symbolize) {
-    const char *external_symbolizer = GetEnv("ASAN_SYMBOLIZER_PATH");
-    if (external_symbolizer) {
-      InitializeExternalSymbolizer(external_symbolizer);
-    }
+  if (flags()->symbolize && asan_external_symbolizer &&
+      asan_external_symbolizer[0]) {
+    InitializeExternalSymbolizer(asan_external_symbolizer);
   }
 
   // On Linux AsanThread::ThreadStart() calls malloc() that's why asan_inited

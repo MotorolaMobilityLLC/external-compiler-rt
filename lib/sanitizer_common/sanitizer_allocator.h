@@ -26,15 +26,15 @@ namespace __sanitizer {
 // SizeClassMap maps allocation sizes into size classes and back.
 // Class 0 corresponds to size 0.
 // Classes 1 - 16 correspond to sizes 16 to 256 (size = class_id * 16).
-// Next 8 classes: 256 + i * 32 (i = 1 to 8).
-// Next 8 classes: 512 + i * 64 (i = 1 to 8).
+// Next 4 classes: 256 + i * 64  (i = 1 to 4).
+// Next 4 classes: 512 + i * 128 (i = 1 to 4).
 // ...
-// Next 8 classes: 2^k + i * 2^(k-3) (i = 1 to 8).
+// Next 4 classes: 2^k + i * 2^(k-2) (i = 1 to 4).
 // Last class corresponds to kMaxSize = 1 << kMaxSizeLog.
 //
 // This structure of the size class map gives us:
 //   - Efficient table-free class-to-size and size-to-class functions.
-//   - Difference between two consequent size classes is betweed 12% and 6%
+//   - Difference between two consequent size classes is betweed 14% and 25%
 //
 // This class also gives a hint to a thread-caching allocator about the amount
 // of chunks that need to be cached per-thread:
@@ -61,45 +61,50 @@ namespace __sanitizer {
 // c15 => s: 240 diff: +16 07% l 7 cached: 256 61440; id 15
 //
 // c16 => s: 256 diff: +16 06% l 8 cached: 256 65536; id 16
-// c17 => s: 288 diff: +32 12% l 8 cached: 227 65376; id 17
-// c18 => s: 320 diff: +32 11% l 8 cached: 204 65280; id 18
-// c19 => s: 352 diff: +32 10% l 8 cached: 186 65472; id 19
-// c20 => s: 384 diff: +32 09% l 8 cached: 170 65280; id 20
-// c21 => s: 416 diff: +32 08% l 8 cached: 157 65312; id 21
-// c22 => s: 448 diff: +32 07% l 8 cached: 146 65408; id 22
-// c23 => s: 480 diff: +32 07% l 8 cached: 136 65280; id 23
+// c17 => s: 320 diff: +64 25% l 8 cached: 204 65280; id 17
+// c18 => s: 384 diff: +64 20% l 8 cached: 170 65280; id 18
+// c19 => s: 448 diff: +64 16% l 8 cached: 146 65408; id 19
 //
-// c24 => s: 512 diff: +32 06% l 9 cached: 128 65536; id 24
-// c25 => s: 576 diff: +64 12% l 9 cached: 113 65088; id 25
-// c26 => s: 640 diff: +64 11% l 9 cached: 102 65280; id 26
-// c27 => s: 704 diff: +64 10% l 9 cached: 93 65472; id 27
-// c28 => s: 768 diff: +64 09% l 9 cached: 85 65280; id 28
-// c29 => s: 832 diff: +64 08% l 9 cached: 78 64896; id 29
-// c30 => s: 896 diff: +64 07% l 9 cached: 73 65408; id 30
-// c31 => s: 960 diff: +64 07% l 9 cached: 68 65280; id 31
+// c20 => s: 512 diff: +64 14% l 9 cached: 128 65536; id 20
+// c21 => s: 640 diff: +128 25% l 9 cached: 102 65280; id 21
+// c22 => s: 768 diff: +128 20% l 9 cached: 85 65280; id 22
+// c23 => s: 896 diff: +128 16% l 9 cached: 73 65408; id 23
 //
-// c32 => s: 1024 diff: +64 06% l 10 cached: 64 65536; id 32
+// c24 => s: 1024 diff: +128 14% l 10 cached: 64 65536; id 24
+// c25 => s: 1280 diff: +256 25% l 10 cached: 51 65280; id 25
+// c26 => s: 1536 diff: +256 20% l 10 cached: 42 64512; id 26
+// c27 => s: 1792 diff: +256 16% l 10 cached: 36 64512; id 27
+//
+// ...
+//
+// c48 => s: 65536 diff: +8192 14% l 16 cached: 1 65536; id 48
+// c49 => s: 81920 diff: +16384 25% l 16 cached: 1 81920; id 49
+// c50 => s: 98304 diff: +16384 20% l 16 cached: 1 98304; id 50
+// c51 => s: 114688 diff: +16384 16% l 16 cached: 1 114688; id 51
+//
+// c52 => s: 131072 diff: +16384 14% l 17 cached: 1 131072; id 52
 
-template <uptr kMaxSizeLog, uptr kMaxNumCachedT, uptr kMaxBytesCachedLog,
-          uptr kMinBatchClassT>
+template <uptr kMaxSizeLog, uptr kMaxNumCachedT, uptr kMaxBytesCachedLog>
 class SizeClassMap {
   static const uptr kMinSizeLog = 4;
   static const uptr kMidSizeLog = kMinSizeLog + 4;
   static const uptr kMinSize = 1 << kMinSizeLog;
   static const uptr kMidSize = 1 << kMidSizeLog;
   static const uptr kMidClass = kMidSize / kMinSize;
-  static const uptr S = 3;
+  static const uptr S = 2;
   static const uptr M = (1 << S) - 1;
 
  public:
   static const uptr kMaxNumCached = kMaxNumCachedT;
+  // We transfer chunks between central and thread-local free lists in batches.
+  // For small size classes we allocate batches separately.
+  // For large size classes we use one of the chunks to store the batch.
   struct TransferBatch {
     TransferBatch *next;
     uptr count;
     void *batch[kMaxNumCached];
   };
 
-  static const uptr kMinBatchClass = kMinBatchClassT;
   static const uptr kMaxSize = 1 << kMaxSizeLog;
   static const uptr kNumClasses =
       kMidClass + ((kMaxSizeLog - kMidSizeLog) << S) + 1;
@@ -143,7 +148,7 @@ class SizeClassMap {
         Printf("\n");
       uptr d = s - prev_s;
       uptr p = prev_s ? (d * 100 / prev_s) : 0;
-      uptr l = MostSignificantSetBitIndex(s);
+      uptr l = s ? MostSignificantSetBitIndex(s) : 0;
       uptr cached = MaxCached(i) * s;
       Printf("c%02zd => s: %zd diff: +%zd %02zd%% l %zd "
              "cached: %zd %zd; id %zd\n",
@@ -152,6 +157,11 @@ class SizeClassMap {
       prev_s = s;
     }
     Printf("Total cached: %zd\n", total_cached);
+  }
+
+  static bool SizeClassRequiresSeparateTransferBatch(uptr class_id) {
+    return Size(class_id) < sizeof(TransferBatch) -
+        sizeof(uptr) * (kMaxNumCached - MaxCached(class_id));
   }
 
   static void Validate() {
@@ -176,24 +186,11 @@ class SizeClassMap {
       if (c > 0)
         CHECK_LT(Size(c-1), s);
     }
-
-    // TransferBatch for kMinBatchClass must fit into the block itself.
-    const uptr batch_size = sizeof(TransferBatch)
-        - sizeof(void*)  // NOLINT
-            * (kMaxNumCached - MaxCached(kMinBatchClass));
-    CHECK_LE(batch_size, Size(kMinBatchClass));
-    // TransferBatch for kMinBatchClass-1 must not fit into the block itself.
-    const uptr batch_size1 = sizeof(TransferBatch)
-        - sizeof(void*)  // NOLINT
-            * (kMaxNumCached - MaxCached(kMinBatchClass - 1));
-    CHECK_GT(batch_size1, Size(kMinBatchClass - 1));
   }
 };
 
-typedef SizeClassMap<17, 256, 16, FIRST_32_SECOND_64(25, 28)>
-    DefaultSizeClassMap;
-typedef SizeClassMap<17, 64, 14, FIRST_32_SECOND_64(17, 20)>
-    CompactSizeClassMap;
+typedef SizeClassMap<17, 256, 16> DefaultSizeClassMap;
+typedef SizeClassMap<17, 64,  14> CompactSizeClassMap;
 template<class SizeClassAllocator> struct SizeClassAllocatorLocalCache;
 
 // Memory allocator statistics
@@ -342,6 +339,7 @@ class SizeClassAllocator64 {
 
   NOINLINE void DeallocateBatch(AllocatorStats *stat, uptr class_id, Batch *b) {
     RegionInfo *region = GetRegionInfo(class_id);
+    CHECK_GT(b->count, 0);
     region->free_list.Push(b);
     region->n_freed += b->count;
   }
@@ -357,10 +355,12 @@ class SizeClassAllocator64 {
   void *GetBlockBegin(void *p) {
     uptr class_id = GetSizeClass(p);
     uptr size = SizeClassMap::Size(class_id);
+    if (!size) return 0;
     uptr chunk_idx = GetChunkIdx((uptr)p, size);
     uptr reg_beg = (uptr)p & ~(kRegionSize - 1);
     uptr beg = chunk_idx * size;
     uptr next_beg = beg + size;
+    if (class_id >= kNumClasses) return 0;
     RegionInfo *region = GetRegionInfo(class_id);
     if (region->mapped_user >= next_beg)
       return reinterpret_cast<void*>(reg_beg + beg);
@@ -430,6 +430,24 @@ class SizeClassAllocator64 {
   void ForceUnlock() {
     for (int i = (int)kNumClasses - 1; i >= 0; i--) {
       GetRegionInfo(i)->mutex.Unlock();
+    }
+  }
+
+  // Iterate over existing chunks. May include chunks that are not currently
+  // allocated to the user (e.g. freed).
+  // The caller is expected to call ForceLock() before calling this function.
+  template<typename Callable>
+  void ForEachChunk(const Callable &callback) {
+    for (uptr class_id = 1; class_id < kNumClasses; class_id++) {
+      RegionInfo *region = GetRegionInfo(class_id);
+      uptr chunk_size = SizeClassMap::Size(class_id);
+      uptr region_beg = kSpaceBeg + class_id * kRegionSize;
+      for (uptr p = region_beg;
+           p < region_beg + region->allocated_user;
+           p += chunk_size) {
+        // Too slow: CHECK_EQ((void *)p, GetBlockBegin((void *)p));
+        callback((void *)p);
+      }
     }
   }
 
@@ -517,13 +535,13 @@ class SizeClassAllocator64 {
     }
     CHECK_LE(region->allocated_meta, region->mapped_meta);
     if (region->allocated_user + region->allocated_meta > kRegionSize) {
-      Printf("Out of memory. Dying.\n");
+      Printf("%s: Out of memory. Dying. ", SanitizerToolName);
       Printf("The process has exhausted %zuMB for size class %zu.\n",
           kRegionSize / 1024 / 1024, size);
       Die();
     }
     for (;;) {
-      if (class_id < SizeClassMap::kMinBatchClass)
+      if (SizeClassMap::SizeClassRequiresSeparateTransferBatch(class_id))
         b = (Batch*)c->Allocate(this, SizeClassMap::ClassID(sizeof(Batch)));
       else
         b = (Batch*)(region_beg + beg_idx);
@@ -535,6 +553,7 @@ class SizeClassAllocator64 {
       beg_idx += count * size;
       if (beg_idx + count * size + size > region->mapped_user)
         break;
+      CHECK_GT(b->count, 0);
       region->free_list.Push(b);
     }
     return b;
@@ -620,6 +639,7 @@ class SizeClassAllocator32 {
     CHECK_LT(class_id, kNumClasses);
     SizeClassInfo *sci = GetSizeClassInfo(class_id);
     SpinMutexLock l(&sci->mutex);
+    CHECK_GT(b->count, 0);
     sci->free_list.push_front(b);
   }
 
@@ -679,6 +699,25 @@ class SizeClassAllocator32 {
     }
   }
 
+  // Iterate over existing chunks. May include chunks that are not currently
+  // allocated to the user (e.g. freed).
+  // The caller is expected to call ForceLock() before calling this function.
+  template<typename Callable>
+  void ForEachChunk(const Callable &callback) {
+    for (uptr region = 0; region < kNumPossibleRegions; region++)
+      if (state_->possible_regions[region]) {
+        uptr chunk_size = SizeClassMap::Size(state_->possible_regions[region]);
+        uptr max_chunks_in_region = kRegionSize / (chunk_size + kMetadataSize);
+        uptr region_beg = region * kRegionSize;
+        for (uptr p = region_beg;
+             p < region_beg + max_chunks_in_region * chunk_size;
+             p += chunk_size) {
+          // Too slow: CHECK_EQ((void *)p, GetBlockBegin((void *)p));
+          callback((void *)p);
+        }
+      }
+  }
+
   void PrintStats() {
   }
 
@@ -733,7 +772,7 @@ class SizeClassAllocator32 {
     Batch *b = 0;
     for (uptr i = reg; i < reg + n_chunks * size; i += size) {
       if (b == 0) {
-        if (class_id < SizeClassMap::kMinBatchClass)
+        if (SizeClassMap::SizeClassRequiresSeparateTransferBatch(class_id))
           b = (Batch*)c->Allocate(this, SizeClassMap::ClassID(sizeof(Batch)));
         else
           b = (Batch*)i;
@@ -741,12 +780,15 @@ class SizeClassAllocator32 {
       }
       b->batch[b->count++] = (void*)i;
       if (b->count == max_count) {
+        CHECK_GT(b->count, 0);
         sci->free_list.push_back(b);
         b = 0;
       }
     }
-    if (b)
+    if (b) {
+      CHECK_GT(b->count, 0);
       sci->free_list.push_back(b);
+    }
   }
 
   struct State {
@@ -791,8 +833,12 @@ struct SizeClassAllocatorLocalCache {
   void Deallocate(SizeClassAllocator *allocator, uptr class_id, void *p) {
     CHECK_NE(class_id, 0UL);
     CHECK_LT(class_id, kNumClasses);
+    // If the first allocator call on a new thread is a deallocation, then
+    // max_count will be zero, leading to check failure.
+    InitCache();
     stats_.Add(AllocatorStatFreed, SizeClassMap::Size(class_id));
     PerClass *c = &per_class_[class_id];
+    CHECK_NE(c->max_count, 0UL);
     if (UNLIKELY(c->count == c->max_count))
       Drain(allocator, class_id);
     c->batch[c->count++] = p;
@@ -818,7 +864,7 @@ struct SizeClassAllocatorLocalCache {
   AllocatorStats stats_;
 
   void InitCache() {
-    if (per_class_[0].max_count)
+    if (per_class_[1].max_count)
       return;
     for (uptr i = 0; i < kNumClasses; i++) {
       PerClass *c = &per_class_[i];
@@ -834,7 +880,7 @@ struct SizeClassAllocatorLocalCache {
     for (uptr i = 0; i < b->count; i++)
       c->batch[i] = b->batch[i];
     c->count = b->count;
-    if (class_id < SizeClassMap::kMinBatchClass)
+    if (SizeClassMap::SizeClassRequiresSeparateTransferBatch(class_id))
       Deallocate(allocator, SizeClassMap::ClassID(sizeof(Batch)), b);
   }
 
@@ -842,7 +888,7 @@ struct SizeClassAllocatorLocalCache {
     InitCache();
     PerClass *c = &per_class_[class_id];
     Batch *b;
-    if (class_id < SizeClassMap::kMinBatchClass)
+    if (SizeClassMap::SizeClassRequiresSeparateTransferBatch(class_id))
       b = (Batch*)Allocate(allocator, SizeClassMap::ClassID(sizeof(Batch)));
     else
       b = (Batch*)c->batch[0];
@@ -853,6 +899,7 @@ struct SizeClassAllocatorLocalCache {
     }
     b->count = cnt;
     c->count -= cnt;
+    CHECK_GT(b->count, 0);
     allocator->DeallocateBatch(&stats_, class_id, b);
   }
 };
@@ -993,6 +1040,15 @@ class LargeMmapAllocator {
 
   void ForceUnlock() {
     mutex_.Unlock();
+  }
+
+  // Iterate over existing chunks. May include chunks that are not currently
+  // allocated to the user (e.g. freed).
+  // The caller is expected to call ForceLock() before calling this function.
+  template<typename Callable>
+  void ForEachChunk(const Callable &callback) {
+    for (uptr i = 0; i < n_chunks_; i++)
+      callback(GetUser(chunks_[i]));
   }
 
  private:
@@ -1156,6 +1212,15 @@ class CombinedAllocator {
   void ForceUnlock() {
     secondary_.ForceUnlock();
     primary_.ForceUnlock();
+  }
+
+  // Iterate over existing chunks. May include chunks that are not currently
+  // allocated to the user (e.g. freed).
+  // The caller is expected to call ForceLock() before calling this function.
+  template<typename Callable>
+  void ForEachChunk(const Callable &callback) {
+    primary_.ForEachChunk(callback);
+    secondary_.ForEachChunk(callback);
   }
 
  private:
