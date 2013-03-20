@@ -79,11 +79,20 @@ static void MallocStress(size_t n) {
 
 
 TEST(AddressSanitizer, NoInstMallocTest) {
-#ifdef __arm__
-  MallocStress(300000);
-#else
-  MallocStress(1000000);
-#endif
+  MallocStress(ASAN_LOW_MEMORY ? 300000 : 1000000);
+}
+
+TEST(AddressSanitizer, ThreadedMallocStressTest) {
+  const int kNumThreads = 4;
+  const int kNumIterations = (ASAN_LOW_MEMORY) ? 10000 : 100000;
+  pthread_t t[kNumThreads];
+  for (int i = 0; i < kNumThreads; i++) {
+    PTHREAD_CREATE(&t[i], 0, (void* (*)(void *x))MallocStress,
+        (void*)kNumIterations);
+  }
+  for (int i = 0; i < kNumThreads; i++) {
+    PTHREAD_JOIN(t[i], 0);
+  }
 }
 
 static void PrintShadow(const char *tag, uptr ptr, size_t size) {
@@ -253,7 +262,7 @@ TEST(AddressSanitizer, QuarantineTest) {
   stack.trace[0] = 0x890;
   stack.size = 1;
 
-  const int size = 32;
+  const int size = 1024;
   void *p = __asan::asan_malloc(size, &stack);
   __asan::asan_free(p, &stack, __asan::FROM_MALLOC);
   size_t i;
@@ -263,8 +272,7 @@ TEST(AddressSanitizer, QuarantineTest) {
     __asan::asan_free(p1, &stack, __asan::FROM_MALLOC);
     if (p1 == p) break;
   }
-  // fprintf(stderr, "i=%ld\n", i);
-  EXPECT_GE(i, 100000U);
+  EXPECT_GE(i, 10000U);
   EXPECT_LT(i, max_i);
 }
 
@@ -455,7 +463,8 @@ TEST(AddressSanitizerInterface, GetHeapSizeTest) {
   // asan_allocator2 does not keep huge chunks in free list, but unmaps them.
   // The chunk should be greater than the quarantine size,
   // otherwise it will be stuck in quarantine instead of being unmaped.
-  static const size_t kLargeMallocSize = 1 << 29;  // 512M
+  static const size_t kLargeMallocSize = (1 << 28) + 1;  // 256M
+  free(Ident(malloc(kLargeMallocSize)));  // Drain quarantine.
   uptr old_heap_size = __asan_get_heap_size();
   for (int i = 0; i < 3; i++) {
     // fprintf(stderr, "allocating %zu bytes:\n", kLargeMallocSize);
@@ -856,4 +865,22 @@ TEST(AddressSanitizerInterface, CallocOverflow2) {
   void *p = calloc(kArraySize, kArraySize2);  // Should return 0.
   EXPECT_EQ(0L, Ident(p));
 #endif
+}
+
+TEST(AddressSanitizerInterface, CallocReturnsZeroMem) {
+  size_t sizes[] = {16, 1000, 10000, 100000, 2100000};
+  for (size_t s = 0; s < ARRAY_SIZE(sizes); s++) {
+    size_t size = sizes[s];
+    for (size_t iter = 0; iter < 5; iter++) {
+      char *x = Ident((char*)calloc(1, size));
+      EXPECT_EQ(x[0], 0);
+      EXPECT_EQ(x[size - 1], 0);
+      EXPECT_EQ(x[size / 2], 0);
+      EXPECT_EQ(x[size / 3], 0);
+      EXPECT_EQ(x[size / 4], 0);
+      memset(x, 0x42, size);
+      free(Ident(x));
+      free(Ident(malloc(Ident(1 << 27))));  // Try to drain the quarantine.
+    }
+  }
 }

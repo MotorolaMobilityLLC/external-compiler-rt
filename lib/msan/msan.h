@@ -26,6 +26,8 @@
 #define MEM_IS_SHADOW(mem) ((uptr)mem >=         0x200000000000ULL && \
                             (uptr)mem <=         0x400000000000ULL)
 
+struct link_map;  // Opaque type returned by dlopen().
+
 const int kMsanParamTlsSizeInWords = 100;
 const int kMsanRetvalTlsSizeInWords = 100;
 
@@ -50,6 +52,14 @@ void EnterSymbolizer();
 void ExitSymbolizer();
 bool IsInSymbolizer();
 
+struct SymbolizerScope {
+  SymbolizerScope() { EnterSymbolizer(); }
+  ~SymbolizerScope() { ExitSymbolizer(); }
+};
+
+void EnterLoader();
+void ExitLoader();
+
 void MsanDie();
 void PrintWarning(uptr pc, uptr bp);
 void PrintWarningWithOrigin(uptr pc, uptr bp, u32 origin);
@@ -61,13 +71,15 @@ void ReportUMR(StackTrace *stack, u32 origin);
 void ReportExpectedUMRNotFound(StackTrace *stack);
 void ReportAtExitStatistics();
 
+void UnpoisonMappedDSO(struct link_map *map);
+
 #define GET_MALLOC_STACK_TRACE                                     \
   StackTrace stack;                                                \
   stack.size = 0;                                                  \
   if (__msan_get_track_origins() && msan_inited)                   \
     GetStackTrace(&stack, flags()->num_callers,                    \
         StackTrace::GetCurrentPc(), GET_CURRENT_FRAME(),           \
-        /* fast */ true)
+        flags()->fast_unwind_on_malloc)
 
 }  // namespace __msan
 

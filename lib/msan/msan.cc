@@ -59,6 +59,7 @@ static THREADLOCAL struct {
 } __msan_stack_bounds;
 
 static THREADLOCAL bool is_in_symbolizer;
+static THREADLOCAL bool is_in_loader;
 
 extern "C" const int __msan_track_origins;
 int __msan_get_track_origins() {
@@ -73,7 +74,7 @@ static bool IsRunningUnderDr() {
   const sptr kBufSize = 4095;
   char *filename = (char*)MmapOrDie(kBufSize, __FUNCTION__);
   while (proc_maps.Next(/* start */0, /* end */0, /* file_offset */0,
-                        filename, kBufSize)) {
+                        filename, kBufSize, /* protection */0)) {
     if (internal_strstr(filename, "libdynamorio") != 0) {
       result = true;
       break;
@@ -86,6 +87,14 @@ static bool IsRunningUnderDr() {
 void EnterSymbolizer() { is_in_symbolizer = true; }
 void ExitSymbolizer()  { is_in_symbolizer = false; }
 bool IsInSymbolizer() { return is_in_symbolizer; }
+
+void EnterLoader() { is_in_loader = true; }
+void ExitLoader()  { is_in_loader = false; }
+
+extern "C" {
+SANITIZER_INTERFACE_ATTRIBUTE
+bool __msan_is_in_loader() { return is_in_loader; }
+}
 
 static Flags msan_flags;
 
@@ -118,6 +127,8 @@ static void ParseFlagsFromString(Flags *f, const char *str) {
   ParseFlag(str, &f->report_umrs, "report_umrs");
   ParseFlag(str, &f->verbosity, "verbosity");
   ParseFlag(str, &f->strip_path_prefix, "strip_path_prefix");
+  ParseFlag(str, &f->fast_unwind_on_fatal, "fast_unwind_on_fatal");
+  ParseFlag(str, &f->fast_unwind_on_malloc, "fast_unwind_on_malloc");
 }
 
 static void InitializeFlags(Flags *f, const char *options) {
@@ -131,6 +142,8 @@ static void InitializeFlags(Flags *f, const char *options) {
   f->report_umrs = true;
   f->verbosity = 0;
   f->strip_path_prefix = "";
+  f->fast_unwind_on_fatal = false;
+  f->fast_unwind_on_malloc = true;
 
   // Override from user-specified string.
   if (__msan_default_options)
@@ -153,8 +166,11 @@ static void GetCurrentStackBounds(uptr *stack_top, uptr *stack_bottom) {
 
 void GetStackTrace(StackTrace *stack, uptr max_s, uptr pc, uptr bp,
                    bool fast) {
-  if (!fast)
+  if (!fast) {
+    // Block reports from our interceptors during _Unwind_Backtrace.
+    SymbolizerScope sym_scope;
     return stack->SlowUnwindStack(pc, max_s);
+  }
 
   uptr stack_top, stack_bottom;
   GetCurrentStackBounds(&stack_top, &stack_bottom);
@@ -183,7 +199,7 @@ void PrintWarningWithOrigin(uptr pc, uptr bp, u32 origin) {
   ++msan_report_count;
 
   StackTrace stack;
-  GetStackTrace(&stack, kStackTraceMax, pc, bp, /*fast*/false);
+  GetStackTrace(&stack, kStackTraceMax, pc, bp, flags()->fast_unwind_on_fatal);
 
   u32 report_origin =
     (__msan_track_origins && OriginIsValid(origin)) ? origin : 0;
@@ -223,6 +239,7 @@ void __msan_init() {
 
   InstallAtExitHandler();
   SetDieCallback(MsanDie);
+  InitTlsSize();
   InitializeInterceptors();
 
   ReplaceOperatorsNewAndDelete();
@@ -281,7 +298,8 @@ void __msan_set_expect_umr(int expect_umr) {
     GET_CALLER_PC_BP_SP;
     (void)sp;
     StackTrace stack;
-    GetStackTrace(&stack, kStackTraceMax, pc, bp, /*fast*/false);
+    GetStackTrace(&stack, kStackTraceMax, pc, bp,
+                  flags()->fast_unwind_on_fatal);
     ReportExpectedUMRNotFound(&stack);
     Die();
   }

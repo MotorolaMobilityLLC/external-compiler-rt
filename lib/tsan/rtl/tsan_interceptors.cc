@@ -15,6 +15,7 @@
 
 #include "sanitizer_common/sanitizer_atomic.h"
 #include "sanitizer_common/sanitizer_libc.h"
+#include "sanitizer_common/sanitizer_platform_limits_posix.h"
 #include "sanitizer_common/sanitizer_placement_new.h"
 #include "sanitizer_common/sanitizer_stacktrace.h"
 #include "interception/interception.h"
@@ -85,11 +86,6 @@ typedef long long_t;  // NOLINT
 typedef void (*sighandler_t)(int sig);
 
 #define errno (*__errno_location())
-
-union pthread_attr_t {
-  char size[kPthreadAttrSize];
-  void *align;
-};
 
 struct sigaction_t {
   union {
@@ -602,7 +598,7 @@ TSAN_INTERCEPTOR(void*, mmap, void *addr, long_t sz, int prot,
   if (res != MAP_FAILED) {
     if (fd > 0)
       FdAccess(thr, pc, fd);
-    MemoryResetRange(thr, pc, (uptr)res, sz);
+    MemoryRangeImitateWrite(thr, pc, (uptr)res, sz);
   }
   return res;
 }
@@ -616,13 +612,14 @@ TSAN_INTERCEPTOR(void*, mmap64, void *addr, long_t sz, int prot,
   if (res != MAP_FAILED) {
     if (fd > 0)
       FdAccess(thr, pc, fd);
-    MemoryResetRange(thr, pc, (uptr)res, sz);
+    MemoryRangeImitateWrite(thr, pc, (uptr)res, sz);
   }
   return res;
 }
 
 TSAN_INTERCEPTOR(int, munmap, void *addr, long_t sz) {
   SCOPED_TSAN_INTERCEPTOR(munmap, addr, sz);
+  DontNeedShadowFor((uptr)addr, sz);
   int res = REAL(munmap)(addr, sz);
   return res;
 }
@@ -734,7 +731,7 @@ extern "C" void *__tsan_thread_start_func(void *arg) {
 TSAN_INTERCEPTOR(int, pthread_create,
     void *th, void *attr, void *(*callback)(void*), void * param) {
   SCOPED_TSAN_INTERCEPTOR(pthread_create, th, attr, callback, param);
-  pthread_attr_t myattr;
+  __sanitizer_pthread_attr_t myattr;
   if (attr == 0) {
     pthread_attr_init(&myattr);
     attr = &myattr;
@@ -1804,7 +1801,7 @@ void ProcessPendingSignals(ThreadState *thr) {
               (uptr)sigactions[sig].sa_sigaction :
               (uptr)sigactions[sig].sa_handler;
           stack.Init(&pc, 1);
-          Lock l(&ctx->thread_mtx);
+          ThreadRegistryLock l(ctx->thread_registry);
           ScopedReport rep(ReportTypeErrnoInSignal);
           if (!IsFiredSuppression(ctx, rep, stack)) {
             rep.AddStack(&stack);

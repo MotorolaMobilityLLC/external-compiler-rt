@@ -13,11 +13,13 @@ set(SANITIZER_SOURCES
   sanitizer_printf.cc
   sanitizer_stackdepot.cc
   sanitizer_stacktrace.cc
+  sanitizer_stoptheworld_linux.cc
   sanitizer_symbolizer.cc
   sanitizer_symbolizer_itanium.cc
   sanitizer_symbolizer_linux.cc
   sanitizer_symbolizer_mac.cc
   sanitizer_symbolizer_win.cc
+  sanitizer_thread_registry.cc
   sanitizer_win.cc
   )
 
@@ -36,6 +38,7 @@ set(SANITIZER_HEADERS
   sanitizer_internal_defs.h
   sanitizer_lfstack.h
   sanitizer_libc.h
+  sanitizer_linux.h
   sanitizer_list.h
   sanitizer_mutex.h
   sanitizer_placement_new.h
@@ -46,9 +49,12 @@ set(SANITIZER_HEADERS
   sanitizer_stackdepot.h
   sanitizer_stacktrace.h
   sanitizer_symbolizer.h
+  sanitizer_thread_registry.h
   )
 
-set(SANITIZER_CFLAGS ${SANITIZER_COMMON_CFLAGS})
+set(SANITIZER_CFLAGS
+  ${SANITIZER_COMMON_CFLAGS}
+  -fno-rtti)
 
 set(SANITIZER_RUNTIME_LIBRARIES)
 if(APPLE)

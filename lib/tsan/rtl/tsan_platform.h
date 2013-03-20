@@ -132,8 +132,8 @@ static inline uptr AlternativeAddress(uptr addr) {
 #endif
 }
 
-uptr GetShadowMemoryConsumption();
 void FlushShadowMemory();
+void WriteMemoryProfile(char *buf, uptr buf_size);
 
 const char *InitializePlatform();
 void FinalizePlatform();
@@ -148,7 +148,6 @@ void internal_start_thread(void(*func)(void*), void *arg);
 // Says whether the addr relates to a global var.
 // Guesses with high probability, may yield both false positives and negatives.
 bool IsGlobalVar(uptr addr);
-uptr GetTlsSize();
 void GetThreadStackAndTls(bool main, uptr *stk_addr, uptr *stk_size,
                           uptr *tls_addr, uptr *tls_size);
 int ExtractResolvFDs(void *state, int *fds, int nfd);
