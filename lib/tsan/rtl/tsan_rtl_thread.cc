@@ -27,8 +27,7 @@ ThreadContext::ThreadContext(int tid)
   , thr()
   , sync()
   , epoch0()
-  , epoch1()
-  , dead_info() {
+  , epoch1() {
 }
 
 #ifndef TSAN_GO
@@ -44,6 +43,7 @@ void ThreadContext::OnJoined(void *arg) {
   ThreadState *caller_thr = static_cast<ThreadState *>(arg);
   caller_thr->clock.acquire(&sync);
   StatInc(caller_thr, StatSyncAcquire);
+  sync.Reset();
 }
 
 struct OnCreatedArgs {
@@ -72,11 +72,10 @@ void ThreadContext::OnCreated(void *arg) {
     StatInc(args->thr, StatThreadMaxTid);
 }
 
-void ThreadContext::OnReset(void *arg) {
-  OnCreatedArgs *args = static_cast<OnCreatedArgs *>(arg);
-  StatInc(args->thr, StatThreadReuse);
+void ThreadContext::OnReset() {
   sync.Reset();
-  DestroyAndFree(dead_info);
+  FlushUnneededShadowMemory(GetThreadTrace(tid), TraceSize() * sizeof(Event));
+  //!!! FlushUnneededShadowMemory(GetThreadTraceHeader(tid), sizeof(Trace));
 }
 
 struct OnStartedArgs {
@@ -113,8 +112,10 @@ void ThreadContext::OnStarted(void *arg) {
   thr->clock.acquire(&sync);
   thr->fast_state.SetHistorySize(flags()->history_size);
   const uptr trace = (epoch0 / kTracePartSize) % TraceParts();
-  thr->trace.headers[trace].epoch0 = epoch0;
+  Trace *thr_trace = ThreadTrace(thr->tid);
+  thr_trace->headers[trace].epoch0 = epoch0;
   StatInc(thr, StatSyncAcquire);
+  sync.Reset();
   DPrintf("#%d: ThreadStart epoch=%zu stk_addr=%zx stk_size=%zx "
           "tls_addr=%zx tls_size=%zx\n",
           tid, (uptr)epoch0, args->stk_addr, args->stk_size,
@@ -132,14 +133,6 @@ void ThreadContext::OnFinished() {
     thr->clock.release(&sync);
     StatInc(thr, StatSyncRelease);
   }
-  // Save from info about the thread.
-  dead_info = new(internal_alloc(MBlockDeadInfo, sizeof(ThreadDeadInfo)))
-      ThreadDeadInfo();
-  for (uptr i = 0; i < TraceParts(); i++) {
-    dead_info->trace.headers[i].epoch0 = thr->trace.headers[i].epoch0;
-    dead_info->trace.headers[i].stack0.CopyFrom(
-        thr->trace.headers[i].stack0);
-  }
   epoch1 = thr->fast_state.epoch();
 
 #ifndef TSAN_GO
@@ -150,26 +143,44 @@ void ThreadContext::OnFinished() {
   thr = 0;
 }
 
-static void MaybeReportThreadLeak(ThreadContextBase *tctx_base, void *unused) {
+#ifndef TSAN_GO
+struct ThreadLeak {
+  ThreadContext *tctx;
+  int count;
+};
+
+static void MaybeReportThreadLeak(ThreadContextBase *tctx_base, void *arg) {
+  Vector<ThreadLeak> &leaks = *(Vector<ThreadLeak>*)arg;
   ThreadContext *tctx = static_cast<ThreadContext*>(tctx_base);
-  if (tctx->detached)
+  if (tctx->detached || tctx->status != ThreadStatusFinished)
     return;
-  if (tctx->status != ThreadStatusCreated
-      && tctx->status != ThreadStatusRunning
-      && tctx->status != ThreadStatusFinished)
-    return;
-  ScopedReport rep(ReportTypeThreadLeak);
-  rep.AddThread(tctx);
-  OutputReport(CTX(), rep);
+  for (uptr i = 0; i < leaks.Size(); i++) {
+    if (leaks[i].tctx->creation_stack_id == tctx->creation_stack_id) {
+      leaks[i].count++;
+      return;
+    }
+  }
+  ThreadLeak leak = {tctx, 1};
+  leaks.PushBack(leak);
 }
+#endif
 
 void ThreadFinalize(ThreadState *thr) {
   CHECK_GT(thr->in_rtl, 0);
+#ifndef TSAN_GO
   if (!flags()->report_thread_leaks)
     return;
   ThreadRegistryLock l(CTX()->thread_registry);
+  Vector<ThreadLeak> leaks(MBlockScopedBuf);
   CTX()->thread_registry->RunCallbackForEachThreadLocked(
-      MaybeReportThreadLeak, 0);
+      MaybeReportThreadLeak, &leaks);
+  for (uptr i = 0; i < leaks.Size(); i++) {
+    ScopedReport rep(ReportTypeThreadLeak);
+    rep.AddThread(leaks[i].tctx);
+    rep.SetCount(leaks[i].count);
+    OutputReport(CTX(), rep);
+  }
+#endif
 }
 
 int ThreadCount(ThreadState *thr) {
@@ -304,6 +315,13 @@ void MemoryAccessRange(ThreadState *thr, uptr pc, uptr addr,
 #endif
 
   StatInc(thr, StatMopRange);
+
+  if (*shadow_mem == kShadowRodata) {
+    // Access to .rodata section, no races here.
+    // Measurements show that it can be 10-20% of all memory accesses.
+    StatInc(thr, StatMopRangeRodata);
+    return;
+  }
 
   FastState fast_state = thr->fast_state;
   if (fast_state.GetIgnoreBit())

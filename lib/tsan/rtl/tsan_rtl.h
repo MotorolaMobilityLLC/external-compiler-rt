@@ -137,6 +137,8 @@ Allocator *allocator();
 void TsanCheckFailed(const char *file, int line, const char *cond,
                      u64 v1, u64 v2);
 
+const u64 kShadowRodata = (u64)-1;  // .rodata shadow marker
+
 // FastState (from most significant bit):
 //   ignore          : 1
 //   tid             : kTidBits
@@ -382,6 +384,12 @@ class Shadow : public FastState {
 
 struct SignalContext;
 
+struct JmpBuf {
+  uptr sp;
+  uptr mangled_sp;
+  uptr *shadow_stack_pos;
+};
+
 // This struct is stored in TLS.
 struct ThreadState {
   FastState fast_state;
@@ -404,7 +412,6 @@ struct ThreadState {
   uptr *shadow_stack_pos;
   u64 *racy_shadow_addr;
   u64 racy_state[2];
-  Trace trace;
 #ifndef TSAN_GO
   // C/C++ uses embed shadow stack of fixed size.
   uptr shadow_stack[kShadowStackSize];
@@ -417,6 +424,7 @@ struct ThreadState {
   ThreadClock clock;
 #ifndef TSAN_GO
   AllocatorCache alloc_cache;
+  Vector<JmpBuf> jmp_bufs;
 #endif
   u64 stat[StatCnt];
   const int tid;
@@ -425,6 +433,7 @@ struct ThreadState {
   bool in_symbolizer;
   bool is_alive;
   bool is_freeing;
+  bool is_vptr_access;
   const uptr stk_addr;
   const uptr stk_size;
   const uptr tls_addr;
@@ -458,11 +467,6 @@ INLINE ThreadState *cur_thread() {
 }
 #endif
 
-// An info about a thread that is hold for some time after its termination.
-struct ThreadDeadInfo {
-  Trace trace;
-};
-
 class ThreadContext : public ThreadContextBase {
  public:
   explicit ThreadContext(int tid);
@@ -479,7 +483,6 @@ class ThreadContext : public ThreadContextBase {
   // the event is from a dead thread that shared tid with this thread.
   u64 epoch0;
   u64 epoch1;
-  ThreadDeadInfo *dead_info;
 
   // Override superclass callbacks.
   void OnDead();
@@ -487,7 +490,7 @@ class ThreadContext : public ThreadContextBase {
   void OnFinished();
   void OnStarted(void *arg);
   void OnCreated(void *arg);
-  void OnReset(void *arg);
+  void OnReset();
 };
 
 struct RacyStacks {
@@ -509,6 +512,7 @@ struct RacyAddress {
 struct FiredSuppression {
   ReportType type;
   uptr pc;
+  Suppression *supp;
 };
 
 struct Context {
@@ -521,6 +525,7 @@ struct Context {
   Mutex report_mtx;
   int nreported;
   int nmissed_expected;
+  atomic_uint64_t last_symbolize_time_ns;
 
   ThreadRegistry *thread_registry;
 
@@ -557,6 +562,7 @@ class ScopedReport {
   void AddMutex(const SyncVar *s);
   void AddLocation(uptr addr, uptr size);
   void AddSleep(u32 stack_id);
+  void SetCount(int count);
 
   const ReportDesc *GetReport() const;
 
@@ -574,11 +580,11 @@ void RestoreStack(int tid, const u64 epoch, StackTrace *stk, MutexSet *mset);
 
 void StatAggregate(u64 *dst, u64 *src);
 void StatOutput(u64 *stat);
-void ALWAYS_INLINE INLINE StatInc(ThreadState *thr, StatType typ, u64 n = 1) {
+void ALWAYS_INLINE StatInc(ThreadState *thr, StatType typ, u64 n = 1) {
   if (kCollectStats)
     thr->stat[typ] += n;
 }
-void ALWAYS_INLINE INLINE StatSet(ThreadState *thr, StatType typ, u64 n) {
+void ALWAYS_INLINE StatSet(ThreadState *thr, StatType typ, u64 n) {
   if (kCollectStats)
     thr->stat[typ] = n;
 }
@@ -599,6 +605,7 @@ bool IsFiredSuppression(Context *ctx,
                         const ScopedReport &srep,
                         const StackTrace &trace);
 bool IsExpectedReport(uptr addr, uptr size);
+void PrintMatchedBenignRaces();
 bool FrameIsInternal(const ReportStack *frame);
 ReportStack *SkipTsanInternalFrames(ReportStack *ent);
 
@@ -634,28 +641,30 @@ void MemoryAccessRange(ThreadState *thr, uptr pc, uptr addr,
     uptr size, bool is_write);
 void MemoryAccessRangeStep(ThreadState *thr, uptr pc, uptr addr,
     uptr size, uptr step, bool is_write);
+void UnalignedMemoryAccess(ThreadState *thr, uptr pc, uptr addr,
+    int size, bool kAccessIsWrite, bool kIsAtomic);
 
 const int kSizeLog1 = 0;
 const int kSizeLog2 = 1;
 const int kSizeLog4 = 2;
 const int kSizeLog8 = 3;
 
-void ALWAYS_INLINE INLINE MemoryRead(ThreadState *thr, uptr pc,
+void ALWAYS_INLINE MemoryRead(ThreadState *thr, uptr pc,
                                      uptr addr, int kAccessSizeLog) {
   MemoryAccess(thr, pc, addr, kAccessSizeLog, false, false);
 }
 
-void ALWAYS_INLINE INLINE MemoryWrite(ThreadState *thr, uptr pc,
+void ALWAYS_INLINE MemoryWrite(ThreadState *thr, uptr pc,
                                       uptr addr, int kAccessSizeLog) {
   MemoryAccess(thr, pc, addr, kAccessSizeLog, true, false);
 }
 
-void ALWAYS_INLINE INLINE MemoryReadAtomic(ThreadState *thr, uptr pc,
+void ALWAYS_INLINE MemoryReadAtomic(ThreadState *thr, uptr pc,
                                            uptr addr, int kAccessSizeLog) {
   MemoryAccess(thr, pc, addr, kAccessSizeLog, false, true);
 }
 
-void ALWAYS_INLINE INLINE MemoryWriteAtomic(ThreadState *thr, uptr pc,
+void ALWAYS_INLINE MemoryWriteAtomic(ThreadState *thr, uptr pc,
                                             uptr addr, int kAccessSizeLog) {
   MemoryAccess(thr, pc, addr, kAccessSizeLog, true, true);
 }
@@ -719,9 +728,10 @@ void TraceSwitch(ThreadState *thr);
 uptr TraceTopPC(ThreadState *thr);
 uptr TraceSize();
 uptr TraceParts();
+Trace *ThreadTrace(int tid);
 
 extern "C" void __tsan_trace_switch();
-void ALWAYS_INLINE INLINE TraceAddEvent(ThreadState *thr, FastState fs,
+void ALWAYS_INLINE TraceAddEvent(ThreadState *thr, FastState fs,
                                         EventType typ, u64 addr) {
   DCHECK_GE((int)typ, 0);
   DCHECK_LE((int)typ, 7);

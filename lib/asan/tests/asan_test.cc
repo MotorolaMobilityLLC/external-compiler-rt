@@ -400,8 +400,10 @@ void WrongFree() {
 }
 
 TEST(AddressSanitizer, WrongFreeTest) {
-  EXPECT_DEATH(WrongFree(),
-               "ERROR: AddressSanitizer: attempting free.*not malloc");
+  EXPECT_DEATH(WrongFree(), ASAN_PCRE_DOTALL
+               "ERROR: AddressSanitizer: attempting free.*not malloc"
+               ".*is located 4 bytes inside of 400-byte region"
+               ".*allocated by thread");
 }
 
 void DoubleFree() {
@@ -463,6 +465,9 @@ TEST(AddressSanitizer, ManyStackObjectsTest) {
   EXPECT_DEATH(Ident(ZZZ)[-1] = 0, ASAN_PCRE_DOTALL "XXX.*YYY.*ZZZ");
 }
 
+#if 0  // This test requires online symbolizer.
+// Moved to lit_tests/stack-oob-frames.cc.
+// Reenable here once we have online symbolizer by default.
 NOINLINE static void Frame0(int frame, char *a, char *b, char *c) {
   char d[4] = {0};
   char *D = Ident(d);
@@ -498,6 +503,7 @@ TEST(AddressSanitizer, GuiltyStackFrame2Test) {
 TEST(AddressSanitizer, GuiltyStackFrame3Test) {
   EXPECT_DEATH(Frame3(3), "located .*in frame <.*Frame3");
 }
+#endif
 
 NOINLINE void LongJmpFunc1(jmp_buf buf) {
   // create three red zones for these two stack objects.
@@ -1076,7 +1082,9 @@ TEST(AddressSanitizer, AttributeNoAddressSafetyTest) {
 }
 
 // It doesn't work on Android, as calls to new/delete go through malloc/free.
-#if !defined(ANDROID) && !defined(__ANDROID__)
+// Neither it does on OS X, see
+// https://code.google.com/p/address-sanitizer/issues/detail?id=131.
+#if !defined(ANDROID) && !defined(__ANDROID__) && !defined(__APPLE__)
 static string MismatchStr(const string &str) {
   return string("AddressSanitizer: alloc-dealloc-mismatch \\(") + str;
 }

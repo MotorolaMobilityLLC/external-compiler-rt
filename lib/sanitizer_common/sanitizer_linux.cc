@@ -11,7 +11,9 @@
 // run-time libraries and implements linux-specific functions from
 // sanitizer_libc.h.
 //===----------------------------------------------------------------------===//
-#ifdef __linux__
+
+#include "sanitizer_platform.h"
+#if SANITIZER_LINUX
 
 #include "sanitizer_common.h"
 #include "sanitizer_internal_defs.h"
@@ -38,9 +40,15 @@
 #include <unistd.h>
 #include <unwind.h>
 
-#if !defined(__ANDROID__) && !defined(ANDROID)
+#if !SANITIZER_ANDROID
 #include <sys/signal.h>
 #endif
+
+// <linux/time.h>
+struct kernel_timeval {
+  long tv_sec;
+  long tv_usec;
+};
 
 // <linux/futex.h> is broken on some linux distributions.
 const int FUTEX_WAIT = 0;
@@ -143,6 +151,10 @@ uptr internal_readlink(const char *path, char *buf, uptr bufsize) {
   return (uptr)syscall(__NR_readlink, path, buf, bufsize);
 }
 
+int internal_unlink(const char *path) {
+  return syscall(__NR_unlink, path);
+}
+
 int internal_sched_yield() {
   return syscall(__NR_sched_yield);
 }
@@ -171,6 +183,12 @@ uptr GetTid() {
   return syscall(__NR_gettid);
 }
 
+u64 NanoTime() {
+  kernel_timeval tv;
+  syscall(__NR_gettimeofday, &tv, 0);
+  return (u64)tv.tv_sec * 1000*1000*1000 + tv.tv_usec * 1000;
+}
+
 void GetThreadStackTopAndBottom(bool at_initialization, uptr *stack_top,
                                 uptr *stack_bottom) {
   static const uptr kMaxThreadStackSize = 256 * (1 << 20);  // 256M
@@ -182,7 +200,7 @@ void GetThreadStackTopAndBottom(bool at_initialization, uptr *stack_top,
     CHECK_EQ(getrlimit(RLIMIT_STACK, &rl), 0);
 
     // Find the mapping that contains a stack variable.
-    MemoryMappingLayout proc_maps;
+    MemoryMappingLayout proc_maps(/*cache_enabled*/true);
     uptr start, end, offset;
     uptr prev_end = 0;
     while (proc_maps.Next(&start, &end, &offset, 0, 0, /* protection */0)) {
@@ -245,6 +263,20 @@ const char *GetEnv(const char *name) {
   }
   return 0;  // Not found.
 }
+
+// Does not compile for Go because dlsym() requires -ldl
+#ifndef SANITIZER_GO
+bool SetEnv(const char *name, const char *value) {
+  void *f = dlsym(RTLD_NEXT, "setenv");
+  if (f == 0)
+    return false;
+  typedef int(*setenv_ft)(const char *name, const char *value, int overwrite);
+  setenv_ft setenv_f;
+  CHECK_EQ(sizeof(setenv_f), sizeof(f));
+  internal_memcpy(&setenv_f, &f, sizeof(f));
+  return setenv_f(name, value, 1) == 0;
+}
+#endif
 
 #ifdef __GLIBC__
 
@@ -309,18 +341,22 @@ void PrepareForSandboxing() {
 ProcSelfMapsBuff MemoryMappingLayout::cached_proc_self_maps_;
 StaticSpinMutex MemoryMappingLayout::cache_lock_;  // Linker initialized.
 
-MemoryMappingLayout::MemoryMappingLayout() {
+MemoryMappingLayout::MemoryMappingLayout(bool cache_enabled) {
   proc_self_maps_.len =
       ReadFileToBuffer("/proc/self/maps", &proc_self_maps_.data,
                        &proc_self_maps_.mmaped_size, 1 << 26);
-  if (proc_self_maps_.mmaped_size == 0) {
-    LoadFromCache();
-    CHECK_GT(proc_self_maps_.len, 0);
+  if (cache_enabled) {
+    if (proc_self_maps_.mmaped_size == 0) {
+      LoadFromCache();
+      CHECK_GT(proc_self_maps_.len, 0);
+    }
+  } else {
+    CHECK_GT(proc_self_maps_.mmaped_size, 0);
   }
-  // internal_write(2, proc_self_maps_.data, proc_self_maps_.len);
   Reset();
   // FIXME: in the future we may want to cache the mappings on demand only.
-  CacheMemoryMappings();
+  if (cache_enabled)
+    CacheMemoryMappings();
 }
 
 MemoryMappingLayout::~MemoryMappingLayout() {
@@ -611,13 +647,13 @@ int internal_sigaltstack(const struct sigaltstack *ss,
   return syscall(__NR_sigaltstack, ss, oss);
 }
 
-
 // ThreadLister implementation.
 ThreadLister::ThreadLister(int pid)
   : pid_(pid),
     descriptor_(-1),
+    buffer_(4096),
     error_(true),
-    entry_((linux_dirent *)buffer_),
+    entry_((struct linux_dirent *)buffer_.data()),
     bytes_read_(0) {
   char task_directory_path[80];
   internal_snprintf(task_directory_path, sizeof(task_directory_path),
@@ -665,8 +701,8 @@ bool ThreadLister::GetDirectoryEntries() {
   CHECK_GE(descriptor_, 0);
   CHECK_NE(error_, true);
   bytes_read_ = internal_getdents(descriptor_,
-                                  (struct linux_dirent *)buffer_,
-                                  sizeof(buffer_));
+                                  (struct linux_dirent *)buffer_.data(),
+                                  buffer_.size());
   if (bytes_read_ < 0) {
     Report("Can't read directory entries from /proc/%d/task.\n", pid_);
     error_ = true;
@@ -674,7 +710,7 @@ bool ThreadLister::GetDirectoryEntries() {
   } else if (bytes_read_ == 0) {
     return false;
   }
-  entry_ = (struct linux_dirent *)buffer_;
+  entry_ = (struct linux_dirent *)buffer_.data();
   return true;
 }
 
@@ -706,6 +742,30 @@ uptr GetTlsSize() {
   return g_tls_size;
 }
 
+void AdjustStackSizeLinux(void *attr_, int verbosity) {
+  pthread_attr_t *attr = (pthread_attr_t *)attr_;
+  uptr stackaddr = 0;
+  size_t stacksize = 0;
+  pthread_attr_getstack(attr, (void**)&stackaddr, &stacksize);
+  // GLibC will return (0 - stacksize) as the stack address in the case when
+  // stacksize is set, but stackaddr is not.
+  bool stack_set = (stackaddr != 0) && (stackaddr + stacksize != 0);
+  // We place a lot of tool data into TLS, account for that.
+  const uptr minstacksize = GetTlsSize() + 128*1024;
+  if (stacksize < minstacksize) {
+    if (!stack_set) {
+      if (verbosity && stacksize != 0)
+        Printf("Sanitizer: increasing stacksize %zu->%zu\n", stacksize,
+               minstacksize);
+      pthread_attr_setstacksize(attr, minstacksize);
+    } else {
+      Printf("Sanitizer: pre-allocated stack size is insufficient: "
+             "%zu < %zu\n", stacksize, minstacksize);
+      Printf("Sanitizer: pthread_create is likely to fail.\n");
+    }
+  }
+}
+
 }  // namespace __sanitizer
 
-#endif  // __linux__
+#endif  // SANITIZER_LINUX
