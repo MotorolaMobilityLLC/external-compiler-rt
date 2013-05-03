@@ -12,7 +12,8 @@
 // Windows-specific code.
 //===----------------------------------------------------------------------===//
 
-#ifdef _WIN32
+#include "sanitizer_common/sanitizer_platform.h"
+#if SANITIZER_WINDOWS
 
 #include "tsan_platform.h"
 
@@ -51,4 +52,4 @@ void GetThreadStackAndTls(bool main, uptr *stk_addr, uptr *stk_size,
 
 }  // namespace __tsan
 
-#endif  // #ifdef _WIN32
+#endif  // SANITIZER_WINDOWS

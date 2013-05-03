@@ -130,9 +130,11 @@ ScopedReport::ScopedReport(ReportType typ) {
   rep_ = new(mem) ReportDesc;
   rep_->typ = typ;
   ctx_->report_mtx.Lock();
+  CommonSanitizerReportMutex.Lock();
 }
 
 ScopedReport::~ScopedReport() {
+  CommonSanitizerReportMutex.Unlock();
   ctx_->report_mtx.Unlock();
   DestroyAndFree(rep_);
 }
@@ -311,8 +313,9 @@ void ScopedReport::AddLocation(uptr addr, uptr size) {
       AddThread(tctx);
     return;
   }
-  if (allocator()->PointerIsMine((void*)addr)) {
-    MBlock *b = user_mblock(0, (void*)addr);
+  MBlock *b = 0;
+  if (allocator()->PointerIsMine((void*)addr)
+      && (b = user_mblock(0, (void*)addr))) {
     ThreadContext *tctx = FindThreadByTidLocked(b->Tid());
     void *mem = internal_alloc(MBlockReportLoc, sizeof(ReportLocation));
     ReportLocation *loc = new(mem) ReportLocation();
@@ -365,6 +368,10 @@ void ScopedReport::AddSleep(u32 stack_id) {
 }
 #endif
 
+void ScopedReport::SetCount(int count) {
+  rep_->count = count;
+}
+
 const ReportDesc *ScopedReport::GetReport() const {
   return rep_;
 }
@@ -379,18 +386,11 @@ void RestoreStack(int tid, const u64 epoch, StackTrace *stk, MutexSet *mset) {
       ctx->thread_registry->GetThreadLocked(tid));
   if (tctx == 0)
     return;
-  Trace* trace = 0;
-  if (tctx->status == ThreadStatusRunning) {
-    CHECK(tctx->thr);
-    trace = &tctx->thr->trace;
-  } else if (tctx->status == ThreadStatusFinished
-      || tctx->status == ThreadStatusDead) {
-    if (tctx->dead_info == 0)
-      return;
-    trace = &tctx->dead_info->trace;
-  } else {
+  if (tctx->status != ThreadStatusRunning
+      && tctx->status != ThreadStatusFinished
+      && tctx->status != ThreadStatusDead)
     return;
-  }
+  Trace* trace = ThreadTrace(tctx->tid);
   Lock l(&trace->mtx);
   const int partidx = (epoch / kTracePartSize) % TraceParts();
   TraceHeader* hdr = &trace->headers[partidx];
@@ -502,13 +502,15 @@ bool OutputReport(Context *ctx,
                   const ScopedReport &srep,
                   const ReportStack *suppress_stack1,
                   const ReportStack *suppress_stack2) {
+  atomic_store(&ctx->last_symbolize_time_ns, NanoTime(), memory_order_relaxed);
   const ReportDesc *rep = srep.GetReport();
-  uptr suppress_pc = IsSuppressed(rep->typ, suppress_stack1);
+  Suppression *supp = 0;
+  uptr suppress_pc = IsSuppressed(rep->typ, suppress_stack1, &supp);
   if (suppress_pc == 0)
-    suppress_pc = IsSuppressed(rep->typ, suppress_stack2);
+    suppress_pc = IsSuppressed(rep->typ, suppress_stack2, &supp);
   if (suppress_pc != 0) {
-    FiredSuppression supp = {srep.GetReport()->typ, suppress_pc};
-    ctx->fired_suppressions.PushBack(supp);
+    FiredSuppression s = {srep.GetReport()->typ, suppress_pc, supp};
+    ctx->fired_suppressions.PushBack(s);
   }
   if (OnReport(rep, suppress_pc != 0))
     return false;
@@ -524,8 +526,12 @@ bool IsFiredSuppression(Context *ctx,
     if (ctx->fired_suppressions[k].type != srep.GetReport()->typ)
       continue;
     for (uptr j = 0; j < trace.Size(); j++) {
-      if (trace.Get(j) == ctx->fired_suppressions[k].pc)
+      FiredSuppression *s = &ctx->fired_suppressions[k];
+      if (trace.Get(j) == s->pc) {
+        if (s->supp)
+          s->supp->hit_count++;
         return true;
+      }
     }
   }
   return false;
@@ -562,7 +568,7 @@ static bool IsJavaNonsense(const ReportDesc *rep) {
           || (frame->func == 0 && frame->file == 0 && frame->line == 0
           && frame->module == 0)) {
         if (frame) {
-          FiredSuppression supp = {rep->typ, frame->pc};
+          FiredSuppression supp = {rep->typ, frame->pc, 0};
           CTX()->fired_suppressions.PushBack(supp);
         }
         return true;
@@ -622,7 +628,12 @@ void ReportRace(ThreadState *thr) {
   Context *ctx = CTX();
   ThreadRegistryLock l0(ctx->thread_registry);
 
-  ScopedReport rep(freed ? ReportTypeUseAfterFree : ReportTypeRace);
+  ReportType typ = ReportTypeRace;
+  if (thr->is_vptr_access)
+    typ = ReportTypeVptrRace;
+  else if (freed)
+    typ = ReportTypeUseAfterFree;
+  ScopedReport rep(typ);
   const uptr kMop = 2;
   StackTrace traces[kMop];
   const uptr toppc = TraceTopPC(thr);
@@ -684,6 +695,11 @@ void PrintCurrentStackSlow() {
       sizeof(__sanitizer::StackTrace))) __sanitizer::StackTrace;
   ptrace->SlowUnwindStack(__sanitizer::StackTrace::GetCurrentPc(),
       kStackTraceMax);
+  for (uptr i = 0; i < ptrace->size / 2; i++) {
+    uptr tmp = ptrace->trace[i];
+    ptrace->trace[i] = ptrace->trace[ptrace->size - i - 1];
+    ptrace->trace[ptrace->size - i - 1] = tmp;
+  }
   StackTrace trace;
   trace.Init(ptrace->trace, ptrace->size);
   PrintStack(SymbolizeStack(trace));
