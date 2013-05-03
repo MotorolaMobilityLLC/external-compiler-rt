@@ -34,6 +34,7 @@ set(SANITIZER_HEADERS
   sanitizer_common.h
   sanitizer_common_interceptors.inc
   sanitizer_common_interceptors_scanf.inc
+  sanitizer_common_syscalls.inc
   sanitizer_flags.h
   sanitizer_internal_defs.h
   sanitizer_lfstack.h
@@ -73,6 +74,8 @@ else()
   # Otherwise, build separate libraries for each target.
   foreach(arch ${SANITIZER_COMMON_SUPPORTED_ARCH})
     add_compiler_rt_object_library(RTSanitizerCommon ${arch}
+      SOURCES ${SANITIZER_SOURCES} CFLAGS ${SANITIZER_CFLAGS})
+    add_compiler_rt_static_runtime(clang_rt.san-${arch} ${arch}
       SOURCES ${SANITIZER_SOURCES} CFLAGS ${SANITIZER_CFLAGS})
     list(APPEND SANITIZER_RUNTIME_LIBRARIES RTSanitizerCommon.${arch})
   endforeach()
