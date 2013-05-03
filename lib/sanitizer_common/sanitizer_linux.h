@@ -13,6 +13,7 @@
 #ifndef SANITIZER_LINUX_H
 #define SANITIZER_LINUX_H
 
+#include "sanitizer_common.h"
 #include "sanitizer_internal_defs.h"
 
 struct sigaltstack;
@@ -43,11 +44,14 @@ class ThreadLister {
 
   int pid_;
   int descriptor_;
-  char buffer_[4096];
+  InternalScopedBuffer<char> buffer_;
   bool error_;
   struct linux_dirent* entry_;
   int bytes_read_;
 };
+
+void AdjustStackSizeLinux(void *attr, int verbosity);
+
 }  // namespace __sanitizer
 
 #endif  // SANITIZER_LINUX_H

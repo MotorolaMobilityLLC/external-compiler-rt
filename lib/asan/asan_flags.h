@@ -56,11 +56,11 @@ struct Flags {
   bool replace_intrin;
   // Used on Mac only.
   bool mac_ignore_invalid_free;
-  // ASan allocator flag. See asan_allocator.cc.
+  // ASan allocator flag.
   bool use_fake_stack;
-  // ASan allocator flag. Sets the maximal size of allocation request
-  // that would return memory filled with zero bytes.
-  int  max_malloc_fill_size;
+  // ASan allocator flag. max_malloc_fill_size is the maximal amount of bytes
+  // that will be filled with malloc_fill_byte on malloc.
+  int max_malloc_fill_size, malloc_fill_byte;
   // Override exit status if something was reported.
   int  exitcode;
   // If set, user may manually mark memory regions as poisoned or unpoisoned.
@@ -71,6 +71,8 @@ struct Flags {
   int  sleep_before_dying;
   // If set, registers ASan custom segv handler.
   bool handle_segv;
+  // If set, allows user register segv handler even if ASan registers one.
+  bool allow_user_segv_handler;
   // If set, uses alternate stack for signal handling.
   bool use_sigaltstack;
   // Allow the users to work around the bug in Nvidia drivers prior to 295.*.
@@ -113,9 +115,15 @@ struct Flags {
   // If true, assume that memcmp(p1, p2, n) always reads n bytes before
   // comparing p1 and p2.
   bool strict_memcmp;
+  // If true, assume that dynamic initializers can never access globals from
+  // other modules, even if the latter are already initialized.
+  bool strict_init_order;
 };
 
-Flags *flags();
+extern Flags asan_flags_dont_use_directly;
+inline Flags *flags() {
+  return &asan_flags_dont_use_directly;
+}
 void InitializeFlags(Flags *f, const char *env);
 
 }  // namespace __asan

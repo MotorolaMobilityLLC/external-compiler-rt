@@ -189,7 +189,7 @@ class SizeClassMap {
   }
 };
 
-typedef SizeClassMap<17, 256, 16> DefaultSizeClassMap;
+typedef SizeClassMap<17, 128, 16> DefaultSizeClassMap;
 typedef SizeClassMap<17, 64,  14> CompactSizeClassMap;
 template<class SizeClassAllocator> struct SizeClassAllocatorLocalCache;
 
@@ -1014,7 +1014,7 @@ class LargeMmapAllocator {
     CHECK_GE(nearest_chunk, h->map_beg);
     CHECK_LT(nearest_chunk, h->map_beg + h->map_size);
     CHECK_LE(nearest_chunk, p);
-    if (h->map_beg + h->map_size < p)
+    if (h->map_beg + h->map_size <= p)
       return 0;
     return GetUser(h);
   }

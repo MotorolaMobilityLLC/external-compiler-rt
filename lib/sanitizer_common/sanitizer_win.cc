@@ -11,7 +11,10 @@
 // run-time libraries and implements windows-specific functions from
 // sanitizer_libc.h.
 //===----------------------------------------------------------------------===//
-#ifdef _WIN32
+
+#include "sanitizer_platform.h"
+#if SANITIZER_WINDOWS
+
 #define WIN32_LEAN_AND_MEAN
 #define NOGDI
 #include <stdlib.h>
@@ -42,8 +45,14 @@ int GetPid() {
   return GetProcessId(GetCurrentProcess());
 }
 
-uptr GetThreadSelf() {
+// In contrast to POSIX, on Windows GetCurrentThreadId()
+// returns a system-unique identifier.
+uptr GetTid() {
   return GetCurrentThreadId();
+}
+
+uptr GetThreadSelf() {
+  return GetTid();
 }
 
 void GetThreadStackTopAndBottom(bool at_initialization, uptr *stack_top,
