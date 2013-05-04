@@ -24,7 +24,6 @@ ASAN_HAS_EXCEPTIONS=1
 ASAN_FLEXIBLE_MAPPING_AND_OFFSET=0
 
 asan_rtl_files := \
-	asan_allocator.cc	\
 	asan_allocator2.cc	\
 	asan_fake_stack.cc \
 	asan_globals.cc	\
@@ -42,7 +41,6 @@ asan_rtl_files := \
 	asan_stack.cc	\
 	asan_stats.cc	\
 	asan_thread.cc	\
-	asan_thread_registry.cc \
 	asan_win.cc \
 	../interception/interception_linux.cc \
 	../sanitizer_common/sanitizer_allocator.cc \
@@ -61,6 +59,7 @@ asan_rtl_files := \
 	../sanitizer_common/sanitizer_symbolizer_linux.cc \
 	../sanitizer_common/sanitizer_symbolizer_mac.cc \
 	../sanitizer_common/sanitizer_symbolizer_win.cc \
+	../sanitizer_common/sanitizer_thread_registry.cc \
 	../sanitizer_common/sanitizer_win.cc \
 
 asan_rtl_cflags := \
@@ -71,6 +70,7 @@ asan_rtl_cflags := \
 	-DASAN_HAS_EXCEPTIONS=$(ASAN_HAS_EXCEPTIONS) \
 	-DASAN_FLEXIBLE_MAPPING_AND_OFFSET=$(ASAN_FLEXIBLE_MAPPING_AND_OFFSET) \
 	-Wno-covered-switch-default \
+	-Wno-non-virtual-dtor \
 	-Wno-sign-compare \
 	-Wno-unused-parameter \
 	-D__WORDSIZE=32
@@ -90,6 +90,7 @@ asan_test_cflags := \
 	-DASAN_HAS_EXCEPTIONS=$(ASAN_HAS_EXCEPTIONS) \
 	-DASAN_HAS_BLACKLIST=1 \
 	-Wno-covered-switch-default \
+	-Wno-non-virtual-dtor \
 	-Wno-sign-compare \
 	-Wno-unused-parameter \
 	-D__WORDSIZE=32
