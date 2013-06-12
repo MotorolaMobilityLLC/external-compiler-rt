@@ -16,8 +16,6 @@ import sys
 
 llvm_symbolizer = None
 symbolizers = {}
-filetypes = {}
-vmaddrs = {}
 DEBUG = False
 demangle = False;
 
@@ -146,7 +144,6 @@ class DarwinSymbolizer(Symbolizer):
       self.arch = 'x86_64'
     else:
       self.arch = 'i386'
-    self.vmaddr = None
     self.pipe = None
 
   def write_addr_to_pipe(self, offset):
@@ -331,7 +328,10 @@ class SymbolizationLoop(object):
 
   def process_stdin(self):
     self.frame_no = 0
-    for line in sys.stdin:
+    while True:
+      line = sys.stdin.readline()
+      if not line:
+        break
       self.current_line = line.rstrip()
       #0 0x7f6e35cf2e45  (/blah/foo.so+0x11fe45)
       stack_trace_line_format = (
