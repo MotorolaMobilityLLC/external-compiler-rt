@@ -38,12 +38,13 @@ static char *ReadFile(const char *filename) {
     internal_snprintf(tmp.data(), tmp.size(), "%s", filename);
   else
     internal_snprintf(tmp.data(), tmp.size(), "%s/%s", GetPwd(), filename);
-  fd_t fd = OpenFile(tmp.data(), false);
-  if (fd == kInvalidFd) {
+  uptr openrv = OpenFile(tmp.data(), false);
+  if (internal_iserror(openrv)) {
     Printf("ThreadSanitizer: failed to open suppressions file '%s'\n",
                tmp.data());
     Die();
   }
+  fd_t fd = openrv;
   const uptr fsize = internal_filesize(fd);
   if (fsize == (uptr)-1) {
     Printf("ThreadSanitizer: failed to stat suppressions file '%s'\n",
@@ -145,19 +146,30 @@ void InitializeSuppressions() {
 #endif
 }
 
+SuppressionType conv(ReportType typ) {
+  if (typ == ReportTypeRace)
+    return SuppressionRace;
+  else if (typ == ReportTypeVptrRace)
+    return SuppressionRace;
+  else if (typ == ReportTypeUseAfterFree)
+    return SuppressionNone;
+  else if (typ == ReportTypeThreadLeak)
+    return SuppressionThread;
+  else if (typ == ReportTypeMutexDestroyLocked)
+    return SuppressionMutex;
+  else if (typ == ReportTypeSignalUnsafe)
+    return SuppressionSignal;
+  else if (typ == ReportTypeErrnoInSignal)
+    return SuppressionNone;
+  Printf("ThreadSanitizer: unknown report type %d\n", typ),
+  Die();
+}
+
 uptr IsSuppressed(ReportType typ, const ReportStack *stack, Suppression **sp) {
   if (g_suppressions == 0 || stack == 0)
     return 0;
-  SuppressionType stype;
-  if (typ == ReportTypeRace)
-    stype = SuppressionRace;
-  else if (typ == ReportTypeThreadLeak)
-    stype = SuppressionThread;
-  else if (typ == ReportTypeMutexDestroyLocked)
-    stype = SuppressionMutex;
-  else if (typ == ReportTypeSignalUnsafe)
-    stype = SuppressionSignal;
-  else
+  SuppressionType stype = conv(typ);
+  if (stype == SuppressionNone)
     return 0;
   for (const ReportStack *frame = stack; frame; frame = frame->next) {
     for (Suppression *supp = g_suppressions; supp; supp = supp->next) {
@@ -175,8 +187,29 @@ uptr IsSuppressed(ReportType typ, const ReportStack *stack, Suppression **sp) {
   return 0;
 }
 
+uptr IsSuppressed(ReportType typ, const ReportLocation *loc, Suppression **sp) {
+  if (g_suppressions == 0 || loc == 0 || loc->type != ReportLocationGlobal)
+    return 0;
+  SuppressionType stype = conv(typ);
+  if (stype == SuppressionNone)
+    return 0;
+  for (Suppression *supp = g_suppressions; supp; supp = supp->next) {
+    if (stype == supp->type &&
+        (SuppressionMatch(supp->templ, loc->name) ||
+         SuppressionMatch(supp->templ, loc->file) ||
+         SuppressionMatch(supp->templ, loc->module))) {
+      DPrintf("ThreadSanitizer: matched suppression '%s'\n", supp->templ);
+      supp->hit_count++;
+      *sp = supp;
+      return loc->addr;
+    }
+  }
+  return 0;
+}
+
 static const char *SuppTypeStr(SuppressionType t) {
   switch (t) {
+  case SuppressionNone:   return "none";
   case SuppressionRace:   return "race";
   case SuppressionMutex:  return "mutex";
   case SuppressionThread: return "thread";
@@ -193,7 +226,7 @@ void PrintMatchedSuppressions() {
   if (hit_count == 0)
     return;
   Printf("ThreadSanitizer: Matched %d suppressions (pid=%d):\n",
-      hit_count, GetPid());
+      hit_count, (int)internal_getpid());
   for (Suppression *supp = g_suppressions; supp; supp = supp->next) {
     if (supp->hit_count == 0)
       continue;
