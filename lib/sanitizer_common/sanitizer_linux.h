@@ -24,9 +24,10 @@ namespace __sanitizer {
 struct linux_dirent;
 
 // Syscall wrappers.
-int internal_getdents(fd_t fd, struct linux_dirent *dirp, unsigned int count);
-int internal_prctl(int option, uptr arg2, uptr arg3, uptr arg4, uptr arg5);
-int internal_sigaltstack(const struct sigaltstack *ss, struct sigaltstack *oss);
+uptr internal_getdents(fd_t fd, struct linux_dirent *dirp, unsigned int count);
+uptr internal_prctl(int option, uptr arg2, uptr arg3, uptr arg4, uptr arg5);
+uptr internal_sigaltstack(const struct sigaltstack* ss,
+                          struct sigaltstack* oss);
 
 // This class reads thread IDs from /proc/<pid>/task using only syscalls.
 class ThreadLister {
@@ -51,6 +52,18 @@ class ThreadLister {
 };
 
 void AdjustStackSizeLinux(void *attr, int verbosity);
+
+// Exposed for testing.
+uptr ThreadDescriptorSize();
+uptr ThreadSelf();
+uptr ThreadSelfOffset();
+
+// Matches a library's file name against a base name (stripping path and version
+// information).
+bool LibraryNameIs(const char *full_name, const char *base_name);
+
+// Read the name of the current binary from /proc/self/exe.
+uptr ReadBinaryName(/*out*/char *buf, uptr buf_len);
 
 }  // namespace __sanitizer
 

@@ -132,6 +132,8 @@ using namespace __sanitizer;  // NOLINT
 #else  // _MSC_VER
 # define ALWAYS_INLINE inline __attribute__((always_inline))
 # define ALIAS(x) __attribute__((alias(x)))
+// Please only use the ALIGNED macro before the type.
+// Using ALIGNED after the variable declaration is not portable!
 # define ALIGNED(x) __attribute__((aligned(x)))
 # define FORMAT(f, a)  __attribute__((format(printf, f, a)))
 # define NOINLINE __attribute__((noinline))
@@ -149,6 +151,14 @@ using namespace __sanitizer;  // NOLINT
 #  define PREFETCH(x) __builtin_prefetch(x)
 # endif
 #endif  // _MSC_VER
+
+// Unaligned versions of basic types.
+typedef ALIGNED(1) u16 uu16;
+typedef ALIGNED(1) u32 uu32;
+typedef ALIGNED(1) u64 uu64;
+typedef ALIGNED(1) s16 us16;
+typedef ALIGNED(1) s32 us32;
+typedef ALIGNED(1) s64 us64;
 
 #if SANITIZER_WINDOWS
 typedef unsigned long DWORD;  // NOLINT
@@ -273,10 +283,12 @@ extern "C" void* _ReturnAddress(void);
 # define GET_CURRENT_FRAME() (uptr)0xDEADBEEF
 #endif
 
-#define HANDLE_EINTR(res, f) {                               \
-  do {                                                                  \
-    res = (f);                                                         \
-  } while (res == -1 && errno == EINTR); \
+#define HANDLE_EINTR(res, f)                                       \
+  {                                                                \
+    int rverrno;                                                   \
+    do {                                                           \
+      res = (f);                                                   \
+    } while (internal_iserror(res, &rverrno) && rverrno == EINTR); \
   }
 
 #endif  // SANITIZER_DEFS_H

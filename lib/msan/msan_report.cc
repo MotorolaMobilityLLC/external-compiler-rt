@@ -13,7 +13,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "msan.h"
+#include "sanitizer_common/sanitizer_allocator_internal.h"
 #include "sanitizer_common/sanitizer_common.h"
+#include "sanitizer_common/sanitizer_flags.h"
 #include "sanitizer_common/sanitizer_mutex.h"
 #include "sanitizer_common/sanitizer_report_decorator.h"
 #include "sanitizer_common/sanitizer_stackdepot.h"
@@ -44,7 +46,8 @@ class Decorator: private __sanitizer::AnsiColorDecorator {
 
 static void PrintStack(const uptr *trace, uptr size) {
   SymbolizerScope sym_scope;
-  StackTrace::PrintStack(trace, size, true, flags()->strip_path_prefix, 0);
+  StackTrace::PrintStack(trace, size, true,
+                         common_flags()->strip_path_prefix, 0);
 }
 
 static void DescribeOrigin(u32 origin) {
@@ -80,7 +83,8 @@ static void ReportSummary(const char *error_type, StackTrace *stack) {
     SymbolizeCode(pc, &ai, 1);
   }
   ReportErrorSummary(error_type,
-                     StripPathPrefix(ai.file, flags()->strip_path_prefix),
+                     StripPathPrefix(ai.file,
+                                     common_flags()->strip_path_prefix),
                      ai.line, ai.function);
 }
 
@@ -91,7 +95,7 @@ void ReportUMR(StackTrace *stack, u32 origin) {
 
   Decorator d;
   Printf("%s", d.Warning());
-  Report(" WARNING: Use of uninitialized value\n");
+  Report(" WARNING: MemorySanitizer: use-of-uninitialized-value\n");
   Printf("%s", d.End());
   PrintStack(stack->trace, stack->size);
   if (origin) {

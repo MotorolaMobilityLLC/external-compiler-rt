@@ -21,7 +21,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 
-#if SANITIZER_WINDOWS
+#if SANITIZER_WINDOWS && !defined(va_copy)
 # define va_copy(dst, src) ((dst) = (src))
 #endif
 
@@ -59,7 +59,7 @@ static int AppendUnsigned(char **buff, const char *buff_end, u64 num,
   }
   int result = 0;
   while (pos-- > 0) {
-    uptr digit = num_buffer[pos];
+    char digit = static_cast<char>(num_buffer[pos]);
     result += AppendChar(buff, buff_end, (digit < 10) ? '0' + digit
                                                       : 'a' + digit - 10);
   }
@@ -218,7 +218,7 @@ static void SharedPrintfCode(bool append_pid, const char *format,
     }
     needed_length = 0;
     if (append_pid) {
-      int pid = GetPid();
+      int pid = internal_getpid();
       needed_length += internal_snprintf(buffer, buffer_size, "==%d==", pid);
       if (needed_length >= buffer_size) {
         // The pid doesn't fit into the current buffer.
