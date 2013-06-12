@@ -36,6 +36,7 @@ set(CMAKE_MODULE_PATH
 include(AddCompilerRT)
 
 set(COMPILER_RT_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+set(COMPILER_RT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
 # Setup custom SDK sysroots.
 set(COMPILER_RT_DARWIN_SDK_SYSROOT ${COMPILER_RT_SOURCE_DIR}/SDKs/darwin)
 set(COMPILER_RT_LINUX_SDK_SYSROOT ${COMPILER_RT_SOURCE_DIR}/SDKs/linux)
@@ -126,6 +127,8 @@ set(SANITIZER_COMMON_CFLAGS
   -fno-exceptions
   -fomit-frame-pointer
   -funwind-tables
+  -fno-stack-protector
+  -Wno-gnu  # Variadic macros with 0 arguments for ...
   -O3
   )
 if(NOT WIN32)
@@ -168,7 +171,7 @@ endif()
 # Architectures supported by Sanitizer runtimes. Specific sanitizers may
 # support only subset of these (e.g. TSan works on x86_64 only).
 filter_available_targets(SANITIZER_COMMON_SUPPORTED_ARCH
-  x86_64 i386 powerpc64 powerpc)
+  x86_64 i386 powerpc64)
 
 # Add the public header's directory to the includes for all of compiler-rt.
 include_directories(include)

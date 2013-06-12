@@ -61,9 +61,10 @@ static THREADLOCAL struct {
 static THREADLOCAL bool is_in_symbolizer;
 static THREADLOCAL bool is_in_loader;
 
-extern "C" const int __msan_track_origins;
+extern "C" SANITIZER_WEAK_ATTRIBUTE const int __msan_track_origins;
+
 int __msan_get_track_origins() {
-  return __msan_track_origins;
+  return &__msan_track_origins ? __msan_track_origins : 0;
 }
 
 namespace __msan {
@@ -114,6 +115,7 @@ static const char *StackOriginDescr[kNumStackOriginDescrs];
 static atomic_uint32_t NumStackOriginDescrs;
 
 static void ParseFlagsFromString(Flags *f, const char *str) {
+  ParseCommonFlagsFromString(str);
   ParseFlag(str, &f->poison_heap_with_zeroes, "poison_heap_with_zeroes");
   ParseFlag(str, &f->poison_stack_with_zeroes, "poison_stack_with_zeroes");
   ParseFlag(str, &f->poison_in_malloc, "poison_in_malloc");
@@ -123,28 +125,27 @@ static void ParseFlagsFromString(Flags *f, const char *str) {
     f->exit_code = 1;
     Die();
   }
-  ParseFlag(str, &f->num_callers, "num_callers");
   ParseFlag(str, &f->report_umrs, "report_umrs");
   ParseFlag(str, &f->verbosity, "verbosity");
-  ParseFlag(str, &f->strip_path_prefix, "strip_path_prefix");
-  ParseFlag(str, &f->fast_unwind_on_fatal, "fast_unwind_on_fatal");
-  ParseFlag(str, &f->fast_unwind_on_malloc, "fast_unwind_on_malloc");
   ParseFlag(str, &f->wrap_signals, "wrap_signals");
 }
 
 static void InitializeFlags(Flags *f, const char *options) {
-  internal_memset(f, 0, sizeof(*f));
+  CommonFlags *cf = common_flags();
+  cf->external_symbolizer_path = GetEnv("MSAN_SYMBOLIZER_PATH");
+  cf->strip_path_prefix = "";
+  cf->fast_unwind_on_fatal = false;
+  cf->fast_unwind_on_malloc = true;
+  cf->malloc_context_size = 20;
+  cf->handle_ioctl = true;
 
+  internal_memset(f, 0, sizeof(*f));
   f->poison_heap_with_zeroes = false;
   f->poison_stack_with_zeroes = false;
   f->poison_in_malloc = true;
   f->exit_code = 77;
-  f->num_callers = 20;
   f->report_umrs = true;
   f->verbosity = 0;
-  f->strip_path_prefix = "";
-  f->fast_unwind_on_fatal = false;
-  f->fast_unwind_on_malloc = true;
   f->wrap_signals = true;
 
   // Override from user-specified string.
@@ -201,13 +202,14 @@ void PrintWarningWithOrigin(uptr pc, uptr bp, u32 origin) {
   ++msan_report_count;
 
   StackTrace stack;
-  GetStackTrace(&stack, kStackTraceMax, pc, bp, flags()->fast_unwind_on_fatal);
+  GetStackTrace(&stack, kStackTraceMax, pc, bp,
+                common_flags()->fast_unwind_on_fatal);
 
   u32 report_origin =
-    (__msan_track_origins && OriginIsValid(origin)) ? origin : 0;
+    (__msan_get_track_origins() && OriginIsValid(origin)) ? origin : 0;
   ReportUMR(&stack, report_origin);
 
-  if (__msan_track_origins && !OriginIsValid(origin)) {
+  if (__msan_get_track_origins() && !OriginIsValid(origin)) {
     Printf("  ORIGIN: invalid (%x). Might be a bug in MemorySanitizer, "
            "please report to MemorySanitizer developers.\n",
            origin);
@@ -262,10 +264,10 @@ void __msan_init() {
 
   msan_running_under_dr = IsRunningUnderDr();
   __msan_clear_on_return();
-  if (__msan_track_origins && flags()->verbosity > 0)
+  if (__msan_get_track_origins() && flags()->verbosity > 0)
     Printf("msan_track_origins\n");
-  if (!InitShadow(/* prot1 */false, /* prot2 */true, /* map_shadow */true,
-                  __msan_track_origins)) {
+  if (!InitShadow(/* prot1 */ false, /* prot2 */ true, /* map_shadow */ true,
+                  __msan_get_track_origins())) {
     // FIXME: prot1 = false is only required when running under DR.
     Printf("FATAL: MemorySanitizer can not mmap the shadow memory.\n");
     Printf("FATAL: Make sure to compile with -fPIE and to link with -pie.\n");
@@ -276,7 +278,7 @@ void __msan_init() {
     Die();
   }
 
-  const char *external_symbolizer = GetEnv("MSAN_SYMBOLIZER_PATH");
+  const char *external_symbolizer = common_flags()->external_symbolizer_path;
   if (external_symbolizer && external_symbolizer[0]) {
     CHECK(InitializeExternalSymbolizer(external_symbolizer));
   }
@@ -302,7 +304,7 @@ void __msan_set_expect_umr(int expect_umr) {
     (void)sp;
     StackTrace stack;
     GetStackTrace(&stack, kStackTraceMax, pc, bp,
-                  flags()->fast_unwind_on_fatal);
+                  common_flags()->fast_unwind_on_fatal);
     ReportExpectedUMRNotFound(&stack);
     Die();
   }
@@ -316,7 +318,7 @@ void __msan_print_shadow(const void *x, uptr size) {
     Printf("%x%x ", s[i] >> 4, s[i] & 0xf);
   }
   Printf("\n");
-  if (__msan_track_origins) {
+  if (__msan_get_track_origins()) {
     for (uptr i = 0; i < size / 4; i++) {
       Printf(" o: %x ", o[i]);
     }
@@ -329,6 +331,10 @@ void __msan_print_param_shadow() {
     Printf("#%d:%zx ", i, __msan_param_tls[i]);
   }
   Printf("\n");
+}
+
+void __msan_unpoison_param(uptr n) {
+  internal_memset(__msan_param_tls, 0, n * sizeof(*__msan_param_tls));
 }
 
 sptr __msan_test_shadow(const void *x, uptr size) {
@@ -392,7 +398,7 @@ void __msan_set_origin(const void *a, uptr size, u32 origin) {
   // Origin mapping is 4 bytes per 4 bytes of application memory.
   // Here we extend the range such that its left and right bounds are both
   // 4 byte aligned.
-  if (!__msan_track_origins) return;
+  if (!__msan_get_track_origins()) return;
   uptr x = MEM_TO_ORIGIN((uptr)a);
   uptr beg = x & ~3UL;  // align down.
   uptr end = (x + size + 3) & ~3UL;  // align up.
@@ -443,7 +449,7 @@ const char *__msan_get_origin_descr_if_stack(u32 id) {
 
 
 u32 __msan_get_origin(const void *a) {
-  if (!__msan_track_origins) return 0;
+  if (!__msan_get_track_origins()) return 0;
   uptr x = (uptr)a;
   uptr aligned = x & ~3ULL;
   uptr origin_ptr = MEM_TO_ORIGIN(aligned);
@@ -452,6 +458,31 @@ u32 __msan_get_origin(const void *a) {
 
 u32 __msan_get_umr_origin() {
   return __msan_origin_tls;
+}
+
+u16 __sanitizer_unaligned_load16(const uu16 *p) {
+  __msan_retval_tls[0] = *(uu16 *)MEM_TO_SHADOW((uptr)p);
+  return *p;
+}
+u32 __sanitizer_unaligned_load32(const uu32 *p) {
+  __msan_retval_tls[0] = *(uu32 *)MEM_TO_SHADOW((uptr)p);
+  return *p;
+}
+u64 __sanitizer_unaligned_load64(const uu64 *p) {
+  __msan_retval_tls[0] = *(uu64 *)MEM_TO_SHADOW((uptr)p);
+  return *p;
+}
+void __sanitizer_unaligned_store16(uu16 *p, u16 x) {
+  *(uu16 *)MEM_TO_SHADOW((uptr)p) = __msan_param_tls[1];
+  *p = x;
+}
+void __sanitizer_unaligned_store32(uu32 *p, u32 x) {
+  *(uu32 *)MEM_TO_SHADOW((uptr)p) = __msan_param_tls[1];
+  *p = x;
+}
+void __sanitizer_unaligned_store64(uu64 *p, u64 x) {
+  *(uu64 *)MEM_TO_SHADOW((uptr)p) = __msan_param_tls[1];
+  *p = x;
 }
 
 #if !SANITIZER_SUPPORTS_WEAK_HOOKS

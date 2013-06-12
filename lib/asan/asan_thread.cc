@@ -19,6 +19,7 @@
 #include "asan_mapping.h"
 #include "sanitizer_common/sanitizer_common.h"
 #include "sanitizer_common/sanitizer_placement_new.h"
+#include "lsan/lsan_common.h"
 
 namespace __asan {
 
@@ -38,7 +39,8 @@ void AsanThreadContext::OnFinished() {
   thread = 0;
 }
 
-static char thread_registry_placeholder[sizeof(ThreadRegistry)];
+// MIPS requires aligned address
+static ALIGNED(16) char thread_registry_placeholder[sizeof(ThreadRegistry)];
 static ThreadRegistry *asan_thread_registry;
 
 static ThreadContextBase *GetAsanThreadContext(u32 tid) {
@@ -99,17 +101,18 @@ void AsanThread::Destroy() {
   // We also clear the shadow on thread destruction because
   // some code may still be executing in later TSD destructors
   // and we don't want it to have any poisoned stack.
-  ClearShadowForThreadStack();
+  ClearShadowForThreadStackAndTLS();
   fake_stack().Cleanup();
   uptr size = RoundUpTo(sizeof(AsanThread), GetPageSizeCached());
   UnmapOrDie(this, size);
 }
 
 void AsanThread::Init() {
-  SetThreadStackTopAndBottom();
+  SetThreadStackAndTls();
+  lsan_disabled_ = 0;
   CHECK(AddrIsInMem(stack_bottom_));
   CHECK(AddrIsInMem(stack_top_ - 1));
-  ClearShadowForThreadStack();
+  ClearShadowForThreadStackAndTLS();
   if (flags()->verbosity >= 1) {
     int local = 0;
     Report("T%d: stack [%p,%p) size 0x%zx; local=%p\n",
@@ -142,14 +145,21 @@ thread_return_t AsanThread::ThreadStart(uptr os_id) {
   return res;
 }
 
-void AsanThread::SetThreadStackTopAndBottom() {
-  GetThreadStackTopAndBottom(tid() == 0, &stack_top_, &stack_bottom_);
+void AsanThread::SetThreadStackAndTls() {
+  uptr stack_size = 0, tls_size = 0;
+  GetThreadStackAndTls(tid() == 0, &stack_bottom_, &stack_size, &tls_begin_,
+                       &tls_size);
+  stack_top_ = stack_bottom_ + stack_size;
+  tls_end_ = tls_begin_ + tls_size;
+
   int local;
   CHECK(AddrIsInStack((uptr)&local));
 }
 
-void AsanThread::ClearShadowForThreadStack() {
+void AsanThread::ClearShadowForThreadStackAndTLS() {
   PoisonShadow(stack_bottom_, stack_top_ - stack_bottom_, 0);
+  if (tls_begin_ != tls_end_)
+    PoisonShadow(tls_begin_, tls_end_ - tls_begin_, 0);
 }
 
 const char *AsanThread::GetFrameNameByAddr(uptr addr, uptr *offset,
@@ -243,5 +253,33 @@ AsanThread *FindThreadByStackAddress(uptr addr) {
                                                    (void *)addr));
   return tctx ? tctx->thread : 0;
 }
-
 }  // namespace __asan
+
+// --- Implementation of LSan-specific functions --- {{{1
+namespace __lsan {
+bool GetThreadRangesLocked(uptr os_id, uptr *stack_begin, uptr *stack_end,
+                           uptr *tls_begin, uptr *tls_end,
+                           uptr *cache_begin, uptr *cache_end) {
+  __asan::AsanThreadContext *context = static_cast<__asan::AsanThreadContext *>(
+      __asan::asanThreadRegistry().FindThreadContextByOsIDLocked(os_id));
+  if (!context) return false;
+  __asan::AsanThread *t = context->thread;
+  if (!t) return false;
+  *stack_begin = t->stack_bottom();
+  *stack_end = t->stack_top();
+  *tls_begin = t->tls_begin();
+  *tls_end = t->tls_end();
+  // ASan doesn't keep allocator caches in TLS, so these are unused.
+  *cache_begin = 0;
+  *cache_end = 0;
+  return true;
+}
+
+void LockThreadRegistry() {
+  __asan::asanThreadRegistry().Lock();
+}
+
+void UnlockThreadRegistry() {
+  __asan::asanThreadRegistry().Unlock();
+}
+}  // namespace __lsan

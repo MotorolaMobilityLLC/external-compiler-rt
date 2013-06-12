@@ -28,9 +28,25 @@
 // ACHTUNG! No other system header includes in this file.
 // Ideally, we should get rid of stdarg.h as well.
 
-extern "C" const int __msan_keep_going;
+extern "C" SANITIZER_WEAK_ATTRIBUTE const int __msan_keep_going;
+
+int __msan_get_keep_going() {
+  return &__msan_keep_going ? __msan_keep_going : 0;
+}
 
 using namespace __msan;
+
+// True if this is a nested interceptor.
+static THREADLOCAL int in_interceptor_scope;
+
+struct InterceptorScope {
+  InterceptorScope() { ++in_interceptor_scope; }
+  ~InterceptorScope() { --in_interceptor_scope; }
+};
+
+bool IsInInterceptorScope() {
+  return in_interceptor_scope;
+}
 
 #define ENSURE_MSAN_INITED() do { \
   CHECK(!msan_init_is_running); \
@@ -39,23 +55,29 @@ using namespace __msan;
   } \
 } while (0)
 
-#define CHECK_UNPOISONED(x, n) \
-  do { \
-    sptr offset = __msan_test_shadow(x, n);                 \
-    if (__msan::IsInSymbolizer()) break;                    \
-    if (offset >= 0 && __msan::flags()->report_umrs) {      \
-      GET_CALLER_PC_BP_SP;                                  \
-      (void)sp;                                             \
-      Printf("UMR in %s at offset %d inside [%p, +%d) \n",  \
-             __FUNCTION__, offset, x, n);                   \
-      __msan::PrintWarningWithOrigin(                       \
-        pc, bp, __msan_get_origin((char*)x + offset));      \
-      if (!__msan_keep_going) {                             \
-        Printf("Exiting\n");                                \
-        Die();                                              \
-      }                                                     \
-    }                                                       \
+// Check that [x, x+n) range is unpoisoned.
+#define CHECK_UNPOISONED_0(x, n)                                              \
+  do {                                                                        \
+    sptr offset = __msan_test_shadow(x, n);                                   \
+    if (__msan::IsInSymbolizer()) break;                                      \
+    if (offset >= 0 && __msan::flags()->report_umrs) {                        \
+      GET_CALLER_PC_BP_SP;                                                    \
+      (void) sp;                                                              \
+      Printf("UMR in %s at offset %d inside [%p, +%d) \n", __FUNCTION__,      \
+             offset, x, n);                                                   \
+      __msan::PrintWarningWithOrigin(pc, bp,                                  \
+                                     __msan_get_origin((char *) x + offset)); \
+      if (!__msan_get_keep_going()) {                                         \
+        Printf("Exiting\n");                                                  \
+        Die();                                                                \
+      }                                                                       \
+    }                                                                         \
   } while (0)
+
+// Check that [x, x+n) range is unpoisoned unless we are in a nested
+// interceptor.
+#define CHECK_UNPOISONED(x, n) \
+  if (!IsInInterceptorScope()) CHECK_UNPOISONED_0(x, n);
 
 static void *fast_memset(void *ptr, int c, SIZE_T n);
 static void *fast_memcpy(void *dst, const void *src, SIZE_T n);
@@ -692,29 +714,17 @@ INTERCEPTOR(SSIZE_T, recv, int fd, void *buf, SIZE_T len, int flags) {
 }
 
 INTERCEPTOR(SSIZE_T, recvfrom, int fd, void *buf, SIZE_T len, int flags,
-    void *srcaddr, void *addrlen) {
+            void *srcaddr, int *addrlen) {
   ENSURE_MSAN_INITED();
   SIZE_T srcaddr_sz;
-  if (srcaddr)
-    srcaddr_sz = __sanitizer_get_socklen_t(addrlen);
+  if (srcaddr) srcaddr_sz = *addrlen;
   SSIZE_T res = REAL(recvfrom)(fd, buf, len, flags, srcaddr, addrlen);
   if (res > 0) {
     __msan_unpoison(buf, res);
     if (srcaddr) {
-      SIZE_T sz = __sanitizer_get_socklen_t(addrlen);
+      SIZE_T sz = *addrlen;
       __msan_unpoison(srcaddr, (sz < srcaddr_sz) ? sz : srcaddr_sz);
     }
-  }
-  return res;
-}
-
-INTERCEPTOR(SSIZE_T, recvmsg, int fd, struct msghdr *msg, int flags) {
-  ENSURE_MSAN_INITED();
-  SSIZE_T res = REAL(recvmsg)(fd, msg, flags);
-  if (res > 0) {
-    for (SIZE_T i = 0; i < __sanitizer_get_msghdr_iovlen(msg); ++i)
-      __msan_unpoison(__sanitizer_get_msghdr_iov_iov_base(msg, i),
-          __sanitizer_get_msghdr_iov_iov_len(msg, i));
   }
   return res;
 }
@@ -813,6 +823,36 @@ INTERCEPTOR(void *, dlopen, const char *filename, int flag) {
     UnpoisonMappedDSO(map);
   }
   return (void *)map;
+}
+
+typedef int (*dl_iterate_phdr_cb)(__sanitizer_dl_phdr_info *info, SIZE_T size,
+                                  void *data);
+struct dl_iterate_phdr_data {
+  dl_iterate_phdr_cb callback;
+  void *data;
+};
+
+static int msan_dl_iterate_phdr_cb(__sanitizer_dl_phdr_info *info, SIZE_T size,
+                                   void *data) {
+  if (info) {
+    __msan_unpoison(info, size);
+    if (info->dlpi_name)
+      __msan_unpoison(info->dlpi_name, REAL(strlen)(info->dlpi_name) + 1);
+  }
+  dl_iterate_phdr_data *cbdata = (dl_iterate_phdr_data *)data;
+  __msan_unpoison_param(3);
+  return cbdata->callback(info, size, cbdata->data);
+}
+
+INTERCEPTOR(int, dl_iterate_phdr, dl_iterate_phdr_cb callback, void *data) {
+  ENSURE_MSAN_INITED();
+  EnterLoader();
+  dl_iterate_phdr_data cbdata;
+  cbdata.callback = callback;
+  cbdata.data = data;
+  int res = REAL(dl_iterate_phdr)(msan_dl_iterate_phdr_cb, (void *)&cbdata);
+  ExitLoader();
+  return res;
 }
 
 INTERCEPTOR(int, getrusage, int who, void *usage) {
@@ -923,21 +963,38 @@ INTERCEPTOR(int, pthread_create, void *th, void *attr, void *(*callback)(void*),
   return res;
 }
 
+struct MSanInterceptorContext {
+  bool in_interceptor_scope;
+};
+
+// A version of CHECK_UNPOISED using a saved scope value. Used in common
+// interceptors.
+#define CHECK_UNPOISONED_CTX(ctx, x, n)                        \
+  if (!((MSanInterceptorContext *) ctx)->in_interceptor_scope) \
+    CHECK_UNPOISONED_0(x, n);
+
 #define COMMON_INTERCEPTOR_WRITE_RANGE(ctx, ptr, size) \
-    __msan_unpoison(ptr, size)
-#define COMMON_INTERCEPTOR_READ_RANGE(ctx, ptr, size) do { } while (false)
-#define COMMON_INTERCEPTOR_ENTER(ctx, func, ...)  \
-  do {                                            \
-    if (msan_init_is_running)                     \
-      return REAL(func)(__VA_ARGS__);             \
-    ctx = 0;                                      \
-    (void)ctx;                                    \
-    ENSURE_MSAN_INITED();                         \
+  __msan_unpoison(ptr, size)
+#define COMMON_INTERCEPTOR_READ_RANGE(ctx, ptr, size) \
+  CHECK_UNPOISONED_CTX(ctx, ptr, size);
+#define COMMON_INTERCEPTOR_ENTER(ctx, func, ...)              \
+  if (msan_init_is_running) return REAL(func)(__VA_ARGS__);   \
+  MSanInterceptorContext msan_ctx = {IsInInterceptorScope()}; \
+  ctx = (void *)&msan_ctx;                                    \
+  InterceptorScope interceptor_scope;                         \
+  ENSURE_MSAN_INITED();
+#define COMMON_INTERCEPTOR_FD_ACQUIRE(ctx, fd) \
+  do {                                         \
   } while (false)
-#define COMMON_INTERCEPTOR_FD_ACQUIRE(ctx, fd) do { } while (false)
-#define COMMON_INTERCEPTOR_FD_RELEASE(ctx, fd) do { } while (false)
+#define COMMON_INTERCEPTOR_FD_RELEASE(ctx, fd) \
+  do {                                         \
+  } while (false)
+#define COMMON_INTERCEPTOR_FD_SOCKET_ACCEPT(ctx, fd, newfd) \
+  do {                                                      \
+  } while (false)
 #define COMMON_INTERCEPTOR_SET_THREAD_NAME(ctx, name) \
-  do { } while (false)  // FIXME
+  do {                                                \
+  } while (false)  // FIXME
 #include "sanitizer_common/sanitizer_common_interceptors.inc"
 
 #define COMMON_SYSCALL_PRE_READ_RANGE(p, s) CHECK_UNPOISONED(p, s)
@@ -1135,9 +1192,9 @@ void InitializeInterceptors() {
   INTERCEPT_FUNCTION(epoll_pwait);
   INTERCEPT_FUNCTION(recv);
   INTERCEPT_FUNCTION(recvfrom);
-  INTERCEPT_FUNCTION(recvmsg);
   INTERCEPT_FUNCTION(dladdr);
   INTERCEPT_FUNCTION(dlopen);
+  INTERCEPT_FUNCTION(dl_iterate_phdr);
   INTERCEPT_FUNCTION(getrusage);
   INTERCEPT_FUNCTION(sigaction);
   INTERCEPT_FUNCTION(signal);

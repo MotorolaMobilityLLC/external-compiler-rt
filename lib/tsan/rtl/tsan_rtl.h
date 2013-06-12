@@ -27,6 +27,7 @@
 #define TSAN_RTL_H
 
 #include "sanitizer_common/sanitizer_allocator.h"
+#include "sanitizer_common/sanitizer_allocator_internal.h"
 #include "sanitizer_common/sanitizer_common.h"
 #include "sanitizer_common/sanitizer_thread_registry.h"
 #include "tsan_clock.h"
@@ -424,6 +425,7 @@ struct ThreadState {
   ThreadClock clock;
 #ifndef TSAN_GO
   AllocatorCache alloc_cache;
+  InternalAllocatorCache internal_alloc_cache;
   Vector<JmpBuf> jmp_bufs;
 #endif
   u64 stat[StatCnt];
@@ -600,7 +602,8 @@ void ReportRace(ThreadState *thr);
 bool OutputReport(Context *ctx,
                   const ScopedReport &srep,
                   const ReportStack *suppress_stack1 = 0,
-                  const ReportStack *suppress_stack2 = 0);
+                  const ReportStack *suppress_stack2 = 0,
+                  const ReportLocation *suppress_loc = 0);
 bool IsFiredSuppression(Context *ctx,
                         const ScopedReport &srep,
                         const StackTrace &trace);
@@ -691,8 +694,8 @@ void ProcessPendingSignals(ThreadState *thr);
 void MutexCreate(ThreadState *thr, uptr pc, uptr addr,
                  bool rw, bool recursive, bool linker_init);
 void MutexDestroy(ThreadState *thr, uptr pc, uptr addr);
-void MutexLock(ThreadState *thr, uptr pc, uptr addr);
-void MutexUnlock(ThreadState *thr, uptr pc, uptr addr);
+void MutexLock(ThreadState *thr, uptr pc, uptr addr, int rec = 1);
+int  MutexUnlock(ThreadState *thr, uptr pc, uptr addr, bool all = false);
 void MutexReadLock(ThreadState *thr, uptr pc, uptr addr);
 void MutexReadUnlock(ThreadState *thr, uptr pc, uptr addr);
 void MutexReadOrWriteUnlock(ThreadState *thr, uptr pc, uptr addr);
