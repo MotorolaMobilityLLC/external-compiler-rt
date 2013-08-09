@@ -119,13 +119,11 @@ static void ParseFlagsFromString(Flags *f, const char *str) {
   ParseFlag(str, &f->disable_core, "disable_core");
   ParseFlag(str, &f->allow_reexec, "allow_reexec");
   ParseFlag(str, &f->print_full_thread_history, "print_full_thread_history");
-  ParseFlag(str, &f->log_path, "log_path");
   ParseFlag(str, &f->poison_heap, "poison_heap");
   ParseFlag(str, &f->alloc_dealloc_mismatch, "alloc_dealloc_mismatch");
   ParseFlag(str, &f->use_stack_depot, "use_stack_depot");
   ParseFlag(str, &f->strict_memcmp, "strict_memcmp");
   ParseFlag(str, &f->strict_init_order, "strict_init_order");
-  ParseFlag(str, &f->detect_leaks, "detect_leaks");
 }
 
 void InitializeFlags(Flags *f, const char *env) {
@@ -137,6 +135,9 @@ void InitializeFlags(Flags *f, const char *env) {
   cf->fast_unwind_on_malloc = true;
   cf->strip_path_prefix = "";
   cf->handle_ioctl = false;
+  cf->log_path = 0;
+  cf->detect_leaks = false;
+  cf->leak_check_at_exit = true;
 
   internal_memset(f, 0, sizeof(*f));
   f->quarantine_size = (ASAN_LOW_MEMORY) ? 1UL << 26 : 1UL << 28;
@@ -166,7 +167,6 @@ void InitializeFlags(Flags *f, const char *env) {
   f->disable_core = (SANITIZER_WORDSIZE == 64);
   f->allow_reexec = true;
   f->print_full_thread_history = true;
-  f->log_path = 0;
   f->poison_heap = true;
   // Turn off alloc/dealloc mismatch checker on Mac for now.
   // TODO(glider): Fix known issues and enable this back.
@@ -174,7 +174,6 @@ void InitializeFlags(Flags *f, const char *env) {
   f->use_stack_depot = true;
   f->strict_memcmp = true;
   f->strict_init_order = false;
-  f->detect_leaks = false;
 
   // Override from compile definition.
   ParseFlagsFromString(f, MaybeUseAsanDefaultOptionsCompileDefiniton());
@@ -190,17 +189,17 @@ void InitializeFlags(Flags *f, const char *env) {
   ParseFlagsFromString(f, env);
 
 #if !CAN_SANITIZE_LEAKS
-  if (f->detect_leaks) {
+  if (cf->detect_leaks) {
     Report("%s: detect_leaks is not supported on this platform.\n",
            SanitizerToolName);
-    f->detect_leaks = false;
+    cf->detect_leaks = false;
   }
 #endif
 
-  if (f->detect_leaks && !f->use_stack_depot) {
+  if (cf->detect_leaks && !f->use_stack_depot) {
     Report("%s: detect_leaks is ignored (requires use_stack_depot).\n",
            SanitizerToolName);
-    f->detect_leaks = false;
+    cf->detect_leaks = false;
   }
 }
 
@@ -329,22 +328,12 @@ static void asan_atexit() {
 
 static void InitializeHighMemEnd() {
 #if !ASAN_FIXED_MAPPING
-#if SANITIZER_WORDSIZE == 64
-# if defined(__powerpc64__)
-  // FIXME:
-  // On PowerPC64 we have two different address space layouts: 44- and 46-bit.
-  // We somehow need to figure our which one we are using now and choose
-  // one of 0x00000fffffffffffUL and 0x00003fffffffffffUL.
-  // Note that with 'ulimit -s unlimited' the stack is moved away from the top
-  // of the address space, so simply checking the stack address is not enough.
-  kHighMemEnd = (1ULL << 44) - 1;  // 0x00000fffffffffffUL
-# else
-  kHighMemEnd = (1ULL << 47) - 1;  // 0x00007fffffffffffUL;
-# endif
-#else  // SANITIZER_WORDSIZE == 32
-  kHighMemEnd = (1ULL << 32) - 1;  // 0xffffffff;
-#endif  // SANITIZER_WORDSIZE
+  kHighMemEnd = GetMaxVirtualAddress();
+  // Increase kHighMemEnd to make sure it's properly
+  // aligned together with kHighMemBeg:
+  kHighMemEnd |= SHADOW_GRANULARITY * GetPageSizeCached() - 1;
 #endif  // !ASAN_FIXED_MAPPING
+  CHECK_EQ((kHighMemBeg % GetPageSizeCached()), 0);
 }
 
 static void ProtectGap(uptr a, uptr size) {
@@ -464,7 +453,7 @@ void __asan_init() {
   // initialization steps look at flags().
   const char *options = GetEnv("ASAN_OPTIONS");
   InitializeFlags(flags(), options);
-  __sanitizer_set_report_path(flags()->log_path);
+  __sanitizer_set_report_path(common_flags()->log_path);
 
   if (flags()->verbosity && options) {
     Report("Parsed ASAN_OPTIONS: %s\n", options);
@@ -487,10 +476,10 @@ void __asan_init() {
   ReplaceOperatorsNewAndDelete();
 
   uptr shadow_start = kLowShadowBeg;
-  if (kLowShadowBeg) shadow_start -= GetMmapGranularity();
-  uptr shadow_end = kHighShadowEnd;
+  if (kLowShadowBeg)
+    shadow_start -= GetMmapGranularity();
   bool full_shadow_is_available =
-      MemoryRangeIsAvailable(shadow_start, shadow_end);
+      MemoryRangeIsAvailable(shadow_start, kHighShadowEnd);
 
 #if SANITIZER_LINUX && defined(__x86_64__) && !ASAN_FIXED_MAPPING
   if (!full_shadow_is_available) {
@@ -516,7 +505,7 @@ void __asan_init() {
     ProtectGap(kShadowGapBeg, kShadowGapEnd - kShadowGapBeg + 1);
   } else if (kMidMemBeg &&
       MemoryRangeIsAvailable(shadow_start, kMidMemBeg - 1) &&
-      MemoryRangeIsAvailable(kMidMemEnd + 1, shadow_end)) {
+      MemoryRangeIsAvailable(kMidMemEnd + 1, kHighShadowEnd)) {
     CHECK(kLowShadowBeg != kLowShadowEnd);
     // mmap the low shadow plus at least one page at the left.
     ReserveShadowMemoryRange(shadow_start, kLowShadowEnd);
@@ -568,7 +557,7 @@ void __asan_init() {
 
 #if CAN_SANITIZE_LEAKS
   __lsan::InitCommonLsan();
-  if (flags()->detect_leaks) {
+  if (common_flags()->detect_leaks && common_flags()->leak_check_at_exit) {
     Atexit(__lsan::DoLeakCheck);
   }
 #endif  // CAN_SANITIZE_LEAKS

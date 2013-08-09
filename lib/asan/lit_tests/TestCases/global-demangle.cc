@@ -1,5 +1,4 @@
-// Don't run through %symbolize to avoid c++filt demangling.
-// RUN: %clangxx_asan -O0 %s -o %t && %t 2>&1 | FileCheck %s
+// RUN: %clangxx_asan -O0 %s -o %t && not %t 2>&1 | FileCheck %s
 
 namespace XXX {
 class YYY {

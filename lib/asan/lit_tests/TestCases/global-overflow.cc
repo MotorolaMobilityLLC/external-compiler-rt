@@ -1,7 +1,7 @@
-// RUN: %clangxx_asan -O0 %s -o %t && %t 2>&1 | %symbolize | FileCheck %s
-// RUN: %clangxx_asan -O1 %s -o %t && %t 2>&1 | %symbolize | FileCheck %s
-// RUN: %clangxx_asan -O2 %s -o %t && %t 2>&1 | %symbolize | FileCheck %s
-// RUN: %clangxx_asan -O3 %s -o %t && %t 2>&1 | %symbolize | FileCheck %s
+// RUN: %clangxx_asan -O0 %s -o %t && not %t 2>&1 | FileCheck %s
+// RUN: %clangxx_asan -O1 %s -o %t && not %t 2>&1 | FileCheck %s
+// RUN: %clangxx_asan -O2 %s -o %t && not %t 2>&1 | FileCheck %s
+// RUN: %clangxx_asan -O3 %s -o %t && not %t 2>&1 | FileCheck %s
 
 #include <string.h>
 int main(int argc, char **argv) {
@@ -13,7 +13,7 @@ int main(int argc, char **argv) {
   memset(ZZZ, 0, 10);
   int res = YYY[argc * 10];  // BOOOM
   // CHECK: {{READ of size 1 at 0x.* thread T0}}
-  // CHECK: {{    #0 0x.* in _?main .*global-overflow.cc:}}[[@LINE-2]]
+  // CHECK: {{    #0 0x.* in main .*global-overflow.cc:}}[[@LINE-2]]
   // CHECK: {{0x.* is located 0 bytes to the right of global variable}}
   // CHECK:   {{.*YYY.* of size 10}}
   res += XXX[argc] + ZZZ[argc];
