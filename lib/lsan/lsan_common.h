@@ -15,6 +15,7 @@
 #ifndef LSAN_COMMON_H
 #define LSAN_COMMON_H
 
+#include "sanitizer_common/sanitizer_allocator.h"
 #include "sanitizer_common/sanitizer_common.h"
 #include "sanitizer_common/sanitizer_internal_defs.h"
 #include "sanitizer_common/sanitizer_platform.h"
@@ -50,6 +51,8 @@ struct Flags {
   int max_leaks;
   // If nonzero kill the process with this exit code upon finding leaks.
   int exitcode;
+  // Suppressions file name.
+  const char* suppressions;
 
   // Flags controlling the root set of reachable memory.
   // Global variables (.data and .bss).
@@ -75,17 +78,12 @@ struct Flags {
 extern Flags lsan_flags;
 inline Flags *flags() { return &lsan_flags; }
 
-void InitCommonLsan();
-// Testing interface. Find leaked chunks and dump their addresses to vector.
-void ReportLeaked(InternalVector<void *> *leaked, uptr sources);
-// Normal leak check. Find leaks and print a report according to flags.
-void DoLeakCheck();
-
 struct Leak {
   uptr hit_count;
   uptr total_size;
   u32 stack_trace_id;
   bool is_directly_leaked;
+  bool is_suppressed;
 };
 
 // Aggregates leaks by stack trace prefix.
@@ -96,65 +94,21 @@ class LeakReport {
   void PrintLargest(uptr max_leaks);
   void PrintSummary();
   bool IsEmpty() { return leaks_.size() == 0; }
+  uptr ApplySuppressions();
  private:
-  InternalVector<Leak> leaks_;
+  InternalMmapVector<Leak> leaks_;
 };
+
+typedef InternalMmapVector<uptr> Frontier;
 
 // Platform-specific functions.
 void InitializePlatformSpecificModules();
-void ProcessGlobalRegions(InternalVector<uptr> *frontier);
-void ProcessPlatformSpecificAllocations(InternalVector<uptr> *frontier);
+void ProcessGlobalRegions(Frontier *frontier);
+void ProcessPlatformSpecificAllocations(Frontier *frontier);
 
-void ScanRangeForPointers(uptr begin, uptr end, InternalVector<uptr> *frontier,
+void ScanRangeForPointers(uptr begin, uptr end,
+                          Frontier *frontier,
                           const char *region_type, ChunkTag tag);
-
-// Callables for iterating over chunks. Those classes are used as template
-// parameters in ForEachChunk, so we must expose them here to allow for explicit
-// template instantiation.
-
-// Identifies unreachable chunks which must be treated as reachable. Marks them
-// as reachable and adds them to the frontier.
-class ProcessPlatformSpecificAllocationsCb {
- public:
-  explicit ProcessPlatformSpecificAllocationsCb(InternalVector<uptr> *frontier)
-      : frontier_(frontier) {}
-  void operator()(void *p) const;
- private:
-  InternalVector<uptr> *frontier_;
-};
-
-// Prints addresses of unreachable chunks.
-class PrintLeakedCb {
- public:
-  void operator()(void *p) const;
-};
-
-// Aggregates unreachable chunks into a LeakReport.
-class CollectLeaksCb {
- public:
-  explicit CollectLeaksCb(LeakReport *leak_report)
-      : leak_report_(leak_report) {}
-  void operator()(void *p) const;
- private:
-  LeakReport *leak_report_;
-};
-
-// Scans each leaked chunk for pointers to other leaked chunks, and marks each
-// of them as indirectly leaked.
-class MarkIndirectlyLeakedCb {
- public:
-  void operator()(void *p) const;
-};
-
-// Finds all chunk marked as kIgnored and adds their addresses to frontier.
-class CollectSuppressedCb {
- public:
-  explicit CollectSuppressedCb(InternalVector<uptr> *frontier)
-      : frontier_(frontier) {}
-  void operator()(void *p) const;
- private:
-  InternalVector<uptr> *frontier_;
-};
 
 enum IgnoreObjectResult {
   kIgnoreObjectSuccess,
@@ -162,10 +116,15 @@ enum IgnoreObjectResult {
   kIgnoreObjectInvalid
 };
 
+// Functions called from the parent tool.
+void InitCommonLsan();
+void DoLeakCheck();
+bool DisabledInThisThread();
+
 // The following must be implemented in the parent tool.
 
-template<typename Callable> void ForEachChunk(Callable const &callback);
-// The address range occupied by the global allocator object.
+void ForEachChunk(ForEachChunkCallback callback, void *arg);
+// Returns the address range occupied by the global allocator object.
 void GetAllocatorGlobalRange(uptr *begin, uptr *end);
 // Wrappers for allocator's ForceLock()/ForceUnlock().
 void LockAllocator();
@@ -176,18 +135,25 @@ void UnlockThreadRegistry();
 bool GetThreadRangesLocked(uptr os_id, uptr *stack_begin, uptr *stack_end,
                            uptr *tls_begin, uptr *tls_end,
                            uptr *cache_begin, uptr *cache_end);
-// If p points into a chunk that has been allocated to the user, return its
-// user-visible address. Otherwise, return 0.
-void *PointsIntoChunk(void *p);
-// Return address of user-visible chunk contained in this allocator chunk.
-void *GetUserBegin(void *p);
+// If called from the main thread, updates the main thread's TID in the thread
+// registry. We need this to handle processes that fork() without a subsequent
+// exec(), which invalidates the recorded TID. To update it, we must call
+// gettid() from the main thread. Our solution is to call this function before
+// leak checking and also before every call to pthread_create() (to handle cases
+// where leak checking is initiated from a non-main thread).
+void EnsureMainThreadIDIsCorrect();
+// If p points into a chunk that has been allocated to the user, returns its
+// user-visible address. Otherwise, returns 0.
+uptr PointsIntoChunk(void *p);
+// Returns address of user-visible chunk contained in this allocator chunk.
+uptr GetUserBegin(uptr chunk);
 // Helper for __lsan_ignore_object().
 IgnoreObjectResult IgnoreObjectLocked(const void *p);
 // Wrapper for chunk metadata operations.
 class LsanMetadata {
  public:
-  // Constructor accepts pointer to user-visible chunk.
-  explicit LsanMetadata(void *chunk);
+  // Constructor accepts address of user-visible chunk.
+  explicit LsanMetadata(uptr chunk);
   bool allocated() const;
   ChunkTag tag() const;
   void set_tag(ChunkTag value);
@@ -198,5 +164,12 @@ class LsanMetadata {
 };
 
 }  // namespace __lsan
+
+extern "C" {
+int __lsan_is_turned_off() SANITIZER_WEAK_ATTRIBUTE
+    SANITIZER_INTERFACE_ATTRIBUTE;
+const char *__lsan_default_suppressions() SANITIZER_WEAK_ATTRIBUTE
+    SANITIZER_INTERFACE_ATTRIBUTE;
+}  // extern "C"
 
 #endif  // LSAN_COMMON_H

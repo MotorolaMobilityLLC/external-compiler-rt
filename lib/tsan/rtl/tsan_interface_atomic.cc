@@ -30,7 +30,6 @@ using namespace __tsan;  // NOLINT
 #define SCOPED_ATOMIC(func, ...) \
     const uptr callpc = (uptr)__builtin_return_address(0); \
     uptr pc = __sanitizer::StackTrace::GetCurrentPc(); \
-    pc = __sanitizer::StackTrace::GetPreviousInstructionPc(pc); \
     mo = ConvertOrder(mo); \
     mo = flags()->force_seq_cst_atomics ? (morder)mo_seq_cst : mo; \
     ThreadState *const thr = cur_thread(); \
@@ -660,7 +659,7 @@ a64 __tsan_atomic64_compare_exchange_val(volatile a64 *a, a64 c, a64 v,
 }
 
 #if __TSAN_HAS_INT128
-a128 __tsan_atomic64_compare_exchange_val(volatile a128 *a, a128 c, a128 v,
+a128 __tsan_atomic128_compare_exchange_val(volatile a128 *a, a128 c, a128 v,
     morder mo, morder fmo) {
   SCOPED_ATOMIC(CAS, a, c, v, mo, fmo);
 }
