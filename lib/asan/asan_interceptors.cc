@@ -53,7 +53,7 @@ static inline bool QuickCheckForUnpoisonedRegion(uptr beg, uptr size) {
   } while (0)
 
 #define ASAN_READ_RANGE(offset, size) ACCESS_MEMORY_RANGE(offset, size, false)
-#define ASAN_WRITE_RANGE(offset, size) ACCESS_MEMORY_RANGE(offset, size, true);
+#define ASAN_WRITE_RANGE(offset, size) ACCESS_MEMORY_RANGE(offset, size, true)
 
 // Behavior of functions like "memcpy" or "strcpy" is undefined
 // if memory intervals overlap. We report error in this case.
@@ -94,16 +94,17 @@ void SetThreadName(const char *name) {
     asanThreadRegistry().SetThreadName(t->tid(), name);
 }
 
-static void DisableStrictInitOrderChecker() {
-  if (flags()->strict_init_order)
-    flags()->check_initialization_order = false;
-}
-
 }  // namespace __asan
 
 // ---------------------- Wrappers ---------------- {{{1
 using namespace __asan;  // NOLINT
 
+DECLARE_REAL_AND_INTERCEPTOR(void *, malloc, uptr)
+DECLARE_REAL_AND_INTERCEPTOR(void, free, void *)
+
+#define COMMON_INTERCEPTOR_UNPOISON_PARAM(ctx, count) \
+  do {                                                \
+  } while (false)
 #define COMMON_INTERCEPTOR_WRITE_RANGE(ctx, ptr, size) \
   ASAN_WRITE_RANGE(ptr, size)
 #define COMMON_INTERCEPTOR_READ_RANGE(ctx, ptr, size) ASAN_READ_RANGE(ptr, size)
@@ -128,8 +129,12 @@ using namespace __asan;  // NOLINT
 
 #define COMMON_SYSCALL_PRE_READ_RANGE(p, s) ASAN_READ_RANGE(p, s)
 #define COMMON_SYSCALL_PRE_WRITE_RANGE(p, s) ASAN_WRITE_RANGE(p, s)
-#define COMMON_SYSCALL_POST_READ_RANGE(p, s)
-#define COMMON_SYSCALL_POST_WRITE_RANGE(p, s)
+#define COMMON_SYSCALL_POST_READ_RANGE(p, s) \
+  do {                                       \
+  } while (false)
+#define COMMON_SYSCALL_POST_WRITE_RANGE(p, s) \
+  do {                                        \
+  } while (false)
 #include "sanitizer_common/sanitizer_common_syscalls.inc"
 
 static thread_return_t THREAD_CALLING_CONV asan_thread_start(void *arg) {
@@ -143,8 +148,10 @@ extern "C" int pthread_attr_getdetachstate(void *attr, int *v);
 
 INTERCEPTOR(int, pthread_create, void *thread,
     void *attr, void *(*start_routine)(void*), void *arg) {
+  EnsureMainThreadIDIsCorrect();
   // Strict init-order checking in thread-hostile.
-  DisableStrictInitOrderChecker();
+  if (flags()->strict_init_order)
+    StopInitOrderChecking();
   GET_STACK_TRACE_THREAD;
   int detached = 0;
   if (attr != 0)
@@ -249,10 +256,12 @@ static void MlockIsUnsupported() {
   static bool printed = false;
   if (printed) return;
   printed = true;
-  Printf("INFO: AddressSanitizer ignores mlock/mlockall/munlock/munlockall\n");
+  if (flags()->verbosity > 0) {
+    Printf("INFO: AddressSanitizer ignores "
+           "mlock/mlockall/munlock/munlockall\n");
+  }
 }
 
-extern "C" {
 INTERCEPTOR(int, mlock, const void *addr, uptr len) {
   MlockIsUnsupported();
   return 0;
@@ -272,7 +281,6 @@ INTERCEPTOR(int, munlockall, void) {
   MlockIsUnsupported();
   return 0;
 }
-}  // extern "C"
 
 static inline int CharCmp(unsigned char c1, unsigned char c2) {
   return (c1 == c2) ? 0 : (c1 < c2) ? -1 : 1;
@@ -424,24 +432,6 @@ INTERCEPTOR(char*, strncat, char *to, const char *from, uptr size) {
   return REAL(strncat)(to, from, size);
 }
 
-INTERCEPTOR(int, strcmp, const char *s1, const char *s2) {
-  if (!asan_inited) return internal_strcmp(s1, s2);
-  if (asan_init_is_running) {
-    return REAL(strcmp)(s1, s2);
-  }
-  ENSURE_ASAN_INITED();
-  unsigned char c1, c2;
-  uptr i;
-  for (i = 0; ; i++) {
-    c1 = (unsigned char)s1[i];
-    c2 = (unsigned char)s2[i];
-    if (c1 != c2 || c1 == '\0') break;
-  }
-  ASAN_READ_RANGE(s1, i + 1);
-  ASAN_READ_RANGE(s2, i + 1);
-  return CharCmp(c1, c2);
-}
-
 INTERCEPTOR(char*, strcpy, char *to, const char *from) {  // NOLINT
 #if SANITIZER_MAC
   if (!asan_inited) return REAL(strcpy)(to, from);  // NOLINT
@@ -463,21 +453,16 @@ INTERCEPTOR(char*, strcpy, char *to, const char *from) {  // NOLINT
 
 #if ASAN_INTERCEPT_STRDUP
 INTERCEPTOR(char*, strdup, const char *s) {
-#if SANITIZER_MAC
-  // FIXME: because internal_strdup() uses InternalAlloc(), which currently
-  // just calls malloc() on Mac, we can't use internal_strdup() with the
-  // dynamic runtime. We can remove the call to REAL(strdup) once InternalAlloc
-  // starts using mmap() instead.
-  // See also http://code.google.com/p/address-sanitizer/issues/detail?id=123.
-  if (!asan_inited) return REAL(strdup)(s);
-#endif
   if (!asan_inited) return internal_strdup(s);
   ENSURE_ASAN_INITED();
+  uptr length = REAL(strlen)(s);
   if (flags()->replace_str) {
-    uptr length = REAL(strlen)(s);
     ASAN_READ_RANGE(s, length + 1);
   }
-  return REAL(strdup)(s);
+  GET_STACK_TRACE_MALLOC;
+  void *new_mem = asan_malloc(length + 1, &stack);
+  REAL(memcpy)(new_mem, s, length + 1);
+  return reinterpret_cast<char*>(new_mem);
 }
 #endif
 
@@ -494,26 +479,6 @@ INTERCEPTOR(uptr, strlen, const char *s) {
     ASAN_READ_RANGE(s, length + 1);
   }
   return length;
-}
-
-INTERCEPTOR(int, strncmp, const char *s1, const char *s2, uptr size) {
-  if (!asan_inited) return internal_strncmp(s1, s2, size);
-  // strncmp is called from malloc_default_purgeable_zone()
-  // in __asan::ReplaceSystemAlloc() on Mac.
-  if (asan_init_is_running) {
-    return REAL(strncmp)(s1, s2, size);
-  }
-  ENSURE_ASAN_INITED();
-  unsigned char c1 = 0, c2 = 0;
-  uptr i;
-  for (i = 0; i < size; i++) {
-    c1 = (unsigned char)s1[i];
-    c2 = (unsigned char)s2[i];
-    if (c1 != c2 || c1 == '\0') break;
-  }
-  ASAN_READ_RANGE(s1, Min(i + 1, size));
-  ASAN_READ_RANGE(s2, Min(i + 1, size));
-  return CharCmp(c1, c2);
 }
 
 INTERCEPTOR(char*, strncpy, char *to, const char *from, uptr size) {
@@ -671,9 +636,10 @@ INTERCEPTOR(int, __cxa_atexit, void (*func)(void *), void *arg,
 INTERCEPTOR_WINAPI(DWORD, CreateThread,
                    void* security, uptr stack_size,
                    DWORD (__stdcall *start_routine)(void*), void* arg,
-                   DWORD flags, void* tid) {
+                   DWORD thr_flags, void* tid) {
   // Strict init-order checking in thread-hostile.
-  DisableStrictInitOrderChecker();
+  if (flags()->strict_init_order)
+    StopInitOrderChecking();
   GET_STACK_TRACE_THREAD;
   u32 current_tid = GetCurrentTidOrInvalid();
   AsanThread *t = AsanThread::Create(start_routine, arg);
@@ -681,7 +647,7 @@ INTERCEPTOR_WINAPI(DWORD, CreateThread,
   bool detached = false;  // FIXME: how can we determine it on Windows?
   asanThreadRegistry().CreateThread(*(uptr*)t, detached, current_tid, &args);
   return REAL(CreateThread)(security, stack_size,
-                            asan_thread_start, t, flags, tid);
+                            asan_thread_start, t, thr_flags, tid);
 }
 
 namespace __asan {
@@ -711,11 +677,9 @@ void InitializeAsanInterceptors() {
   // Intercept str* functions.
   ASAN_INTERCEPT_FUNC(strcat);  // NOLINT
   ASAN_INTERCEPT_FUNC(strchr);
-  ASAN_INTERCEPT_FUNC(strcmp);
   ASAN_INTERCEPT_FUNC(strcpy);  // NOLINT
   ASAN_INTERCEPT_FUNC(strlen);
   ASAN_INTERCEPT_FUNC(strncat);
-  ASAN_INTERCEPT_FUNC(strncmp);
   ASAN_INTERCEPT_FUNC(strncpy);
 #if ASAN_INTERCEPT_STRDUP
   ASAN_INTERCEPT_FUNC(strdup);

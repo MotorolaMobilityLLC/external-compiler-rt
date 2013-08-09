@@ -1,23 +1,23 @@
-// RUN: %clangxx_asan -DWAIT -O0 %s -o %t && %t 2>&1 | %symbolize | FileCheck %s
-// RUN: %clangxx_asan -DWAIT -O3 %s -o %t && %t 2>&1 | %symbolize | FileCheck %s
+// RUN: %clangxx_asan -DWAIT -O0 %s -o %t && not %t 2>&1 | FileCheck %s
+// RUN: %clangxx_asan -DWAIT -O3 %s -o %t && not %t 2>&1 | FileCheck %s
 
-// RUN: %clangxx_asan -DWAITPID -O0 %s -o %t && %t 2>&1 | %symbolize | FileCheck %s
-// RUN: %clangxx_asan -DWAITPID -O3 %s -o %t && %t 2>&1 | %symbolize | FileCheck %s
+// RUN: %clangxx_asan -DWAITPID -O0 %s -o %t && not %t 2>&1 | FileCheck %s
+// RUN: %clangxx_asan -DWAITPID -O3 %s -o %t && not %t 2>&1 | FileCheck %s
 
-// RUN: %clangxx_asan -DWAITID -O0 %s -o %t && %t 2>&1 | %symbolize | FileCheck %s
-// RUN: %clangxx_asan -DWAITID -O3 %s -o %t && %t 2>&1 | %symbolize | FileCheck %s
+// RUN: %clangxx_asan -DWAITID -O0 %s -o %t && not %t 2>&1 | FileCheck %s
+// RUN: %clangxx_asan -DWAITID -O3 %s -o %t && not %t 2>&1 | FileCheck %s
 
-// RUN: %clangxx_asan -DWAIT3 -O0 %s -o %t && %t 2>&1 | %symbolize | FileCheck %s
-// RUN: %clangxx_asan -DWAIT3 -O3 %s -o %t && %t 2>&1 | %symbolize | FileCheck %s
+// RUN: %clangxx_asan -DWAIT3 -O0 %s -o %t && not %t 2>&1 | FileCheck %s
+// RUN: %clangxx_asan -DWAIT3 -O3 %s -o %t && not %t 2>&1 | FileCheck %s
 
-// RUN: %clangxx_asan -DWAIT4 -O0 %s -o %t && %t 2>&1 | %symbolize | FileCheck %s
-// RUN: %clangxx_asan -DWAIT4 -O3 %s -o %t && %t 2>&1 | %symbolize | FileCheck %s
+// RUN: %clangxx_asan -DWAIT4 -O0 %s -o %t && not %t 2>&1 | FileCheck %s
+// RUN: %clangxx_asan -DWAIT4 -O3 %s -o %t && not %t 2>&1 | FileCheck %s
 
-// RUN: %clangxx_asan -DWAIT3_RUSAGE -O0 %s -o %t && %t 2>&1 | %symbolize | FileCheck %s
-// RUN: %clangxx_asan -DWAIT3_RUSAGE -O3 %s -o %t && %t 2>&1 | %symbolize | FileCheck %s
+// RUN: %clangxx_asan -DWAIT3_RUSAGE -O0 %s -o %t && not %t 2>&1 | FileCheck %s
+// RUN: %clangxx_asan -DWAIT3_RUSAGE -O3 %s -o %t && not %t 2>&1 | FileCheck %s
 
-// RUN: %clangxx_asan -DWAIT4_RUSAGE -O0 %s -o %t && %t 2>&1 | %symbolize | FileCheck %s
-// RUN: %clangxx_asan -DWAIT4_RUSAGE -O3 %s -o %t && %t 2>&1 | %symbolize | FileCheck %s
+// RUN: %clangxx_asan -DWAIT4_RUSAGE -O0 %s -o %t && not %t 2>&1 | FileCheck %s
+// RUN: %clangxx_asan -DWAIT4_RUSAGE -O3 %s -o %t && not %t 2>&1 | FileCheck %s
 
 
 #include <assert.h>
@@ -53,9 +53,9 @@ int main(int argc, char **argv) {
     // CHECK: stack-buffer-overflow
     // CHECK: {{WRITE of size .* at 0x.* thread T0}}
     // CHECK: {{in .*wait}}
-    // CHECK: {{in _?main .*wait.cc:}}
+    // CHECK: {{in main .*wait.cc:}}
     // CHECK: is located in stack of thread T0 at offset
-    // CHECK: {{in _?main}}
+    // CHECK: {{in main}}
     return res != -1;
   }
   // child

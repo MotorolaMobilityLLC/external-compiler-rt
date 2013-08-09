@@ -1,15 +1,15 @@
 // RUN: %clangxx_asan -O0 %p/SharedLibs/shared-lib-test-so.cc \
 // RUN:     -fPIC -shared -o %t-so.so
-// RUN: %clangxx_asan -O0 %s -o %t && %t 2>&1 | %symbolize | FileCheck %s
+// RUN: %clangxx_asan -O0 %s -o %t && not %t 2>&1 | FileCheck %s
 // RUN: %clangxx_asan -O1 %p/SharedLibs/shared-lib-test-so.cc \
 // RUN:     -fPIC -shared -o %t-so.so
-// RUN: %clangxx_asan -O1 %s -o %t && %t 2>&1 | %symbolize | FileCheck %s
+// RUN: %clangxx_asan -O1 %s -o %t && not %t 2>&1 | FileCheck %s
 // RUN: %clangxx_asan -O2 %p/SharedLibs/shared-lib-test-so.cc \
 // RUN:     -fPIC -shared -o %t-so.so
-// RUN: %clangxx_asan -O2 %s -o %t && %t 2>&1 | %symbolize | FileCheck %s
+// RUN: %clangxx_asan -O2 %s -o %t && not %t 2>&1 | FileCheck %s
 // RUN: %clangxx_asan -O3 %p/SharedLibs/shared-lib-test-so.cc \
 // RUN:     -fPIC -shared -o %t-so.so
-// RUN: %clangxx_asan -O3 %s -o %t && %t 2>&1 | %symbolize | FileCheck %s
+// RUN: %clangxx_asan -O3 %s -o %t && not %t 2>&1 | FileCheck %s
 
 #include <dlfcn.h>
 #include <stdio.h>
@@ -37,6 +37,6 @@ int main(int argc, char *argv[]) {
   // CHECK: {{.*ERROR: AddressSanitizer: global-buffer-overflow}}
   // CHECK: {{READ of size 4 at 0x.* thread T0}}
   // CHECK: {{    #0 0x.*}}
-  // CHECK: {{    #1 0x.* in _?main .*shared-lib-test.cc:}}[[@LINE-4]]
+  // CHECK: {{    #1 0x.* in main .*shared-lib-test.cc:}}[[@LINE-4]]
   return 0;
 }

@@ -1,10 +1,10 @@
-// RUN: %clangxx_asan -O0 %s -o %t && %t 2>&1 | %symbolize > %t.out
+// RUN: %clangxx_asan -O0 %s -o %t && not %t 2>%t.out
 // RUN: FileCheck %s < %t.out && FileCheck %s --check-prefix=CHECK-%os < %t.out
-// RUN: %clangxx_asan -O1 %s -o %t && %t 2>&1 | %symbolize > %t.out
+// RUN: %clangxx_asan -O1 %s -o %t && not %t 2>%t.out
 // RUN: FileCheck %s < %t.out && FileCheck %s --check-prefix=CHECK-%os < %t.out
-// RUN: %clangxx_asan -O2 %s -o %t && %t 2>&1 | %symbolize > %t.out
+// RUN: %clangxx_asan -O2 %s -o %t && not %t 2>%t.out
 // RUN: FileCheck %s < %t.out && FileCheck %s --check-prefix=CHECK-%os < %t.out
-// RUN: %clangxx_asan -O3 %s -o %t && %t 2>&1 | %symbolize > %t.out
+// RUN: %clangxx_asan -O3 %s -o %t && not %t 2>%t.out
 // RUN: FileCheck %s < %t.out && FileCheck %s --check-prefix=CHECK-%os < %t.out
 
 __attribute__((noinline))
@@ -19,5 +19,5 @@ static void NullDeref(int *ptr) {
 }
 int main() {
   NullDeref((int*)0);
-  // CHECK: {{    #1 0x.* in _?main.*null_deref.cc:}}[[@LINE-1]]
+  // CHECK: {{    #1 0x.* in main.*null_deref.cc:}}[[@LINE-1]]
 }

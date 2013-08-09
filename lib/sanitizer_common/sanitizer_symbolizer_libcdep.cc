@@ -190,6 +190,9 @@ bool __sanitizer_symbolize_data(const char *ModuleName, u64 ModuleOffset,
                                 char *Buffer, int MaxLength);
 SANITIZER_WEAK_ATTRIBUTE SANITIZER_INTERFACE_ATTRIBUTE
 void __sanitizer_symbolize_flush();
+SANITIZER_WEAK_ATTRIBUTE SANITIZER_INTERFACE_ATTRIBUTE
+int __sanitizer_symbolize_demangle(const char *Name, char *Buffer,
+                                   int MaxLength);
 }  // extern "C"
 
 class InternalSymbolizer {
@@ -218,10 +221,29 @@ class InternalSymbolizer {
       __sanitizer_symbolize_flush();
   }
 
+  const char *Demangle(const char *name) {
+    if (__sanitizer_symbolize_demangle) {
+      for (uptr res_length = 1024;
+           res_length <= InternalSizeClassMap::kMaxSize;) {
+        char *res_buff = static_cast<char*>(InternalAlloc(res_length));
+        uptr req_length =
+            __sanitizer_symbolize_demangle(name, res_buff, res_length);
+        if (req_length > res_length) {
+          res_length = req_length + 1;
+          InternalFree(res_buff);
+          continue;
+        }
+        return res_buff;
+      }
+    }
+    return name;
+  }
+
  private:
   InternalSymbolizer() { }
 
   static const int kBufferSize = 16 * 1024;
+  static const int kMaxDemangledNameSize = 1024;
   char buffer_[kBufferSize];
 };
 #else  // SANITIZER_SUPPORTS_WEAK_HOOKS
@@ -232,8 +254,8 @@ class InternalSymbolizer {
   char *SendCommand(bool is_data, const char *module_name, uptr module_offset) {
     return 0;
   }
-  void Flush() {
-  }
+  void Flush() { }
+  const char *Demangle(const char *name) { return name; }
 };
 
 #endif  // SANITIZER_SUPPORTS_WEAK_HOOKS
@@ -345,6 +367,12 @@ class Symbolizer {
       external_symbolizer_->Flush();
   }
 
+  const char *Demangle(const char *name) {
+    if (IsSymbolizerAvailable() && internal_symbolizer_ != 0)
+      return internal_symbolizer_->Demangle(name);
+    return DemangleCXXABI(name);
+  }
+
  private:
   char *SendCommand(bool is_data, const char *module_name, uptr module_offset) {
     // First, try to use internal symbolizer.
@@ -449,6 +477,10 @@ bool IsSymbolizerAvailable() {
 
 void FlushSymbolizer() {
   symbolizer.Flush();
+}
+
+const char *Demangle(const char *name) {
+  return symbolizer.Demangle(name);
 }
 
 }  // namespace __sanitizer

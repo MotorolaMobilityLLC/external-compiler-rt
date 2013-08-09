@@ -106,17 +106,25 @@ static ReportStack *SymbolizeStack(const StackTrace& trace) {
     return 0;
   ReportStack *stack = 0;
   for (uptr si = 0; si < trace.Size(); si++) {
+    const uptr pc = trace.Get(si);
+#ifndef TSAN_GO
     // We obtain the return address, that is, address of the next instruction,
     // so offset it by 1 byte.
-    bool is_last = (si == trace.Size() - 1);
-    ReportStack *ent = SymbolizeCode(trace.Get(si) - !is_last);
+    const uptr pc1 = __sanitizer::StackTrace::GetPreviousInstructionPc(pc);
+#else
+    // FIXME(dvyukov): Go sometimes uses address of a function as top pc.
+    uptr pc1 = pc;
+    if (si != trace.Size() - 1)
+      pc1 -= 1;
+#endif
+    ReportStack *ent = SymbolizeCode(pc1);
     CHECK_NE(ent, 0);
     ReportStack *last = ent;
     while (last->next) {
-      last->pc += !is_last;
+      last->pc = pc;  // restore original pc for report
       last = last->next;
     }
-    last->pc += !is_last;
+    last->pc = pc;  // restore original pc for report
     last->next = stack;
     stack = ent;
   }
@@ -514,7 +522,7 @@ bool OutputReport(Context *ctx,
     suppress_pc = IsSuppressed(rep->typ, suppress_loc, &supp);
   if (suppress_pc != 0) {
     FiredSuppression s = {srep.GetReport()->typ, suppress_pc, supp};
-    ctx->fired_suppressions.PushBack(s);
+    ctx->fired_suppressions.push_back(s);
   }
   if (OnReport(rep, suppress_pc != 0))
     return false;
@@ -526,7 +534,7 @@ bool OutputReport(Context *ctx,
 bool IsFiredSuppression(Context *ctx,
                         const ScopedReport &srep,
                         const StackTrace &trace) {
-  for (uptr k = 0; k < ctx->fired_suppressions.Size(); k++) {
+  for (uptr k = 0; k < ctx->fired_suppressions.size(); k++) {
     if (ctx->fired_suppressions[k].type != srep.GetReport()->typ)
       continue;
     for (uptr j = 0; j < trace.Size(); j++) {
@@ -544,7 +552,7 @@ bool IsFiredSuppression(Context *ctx,
 static bool IsFiredSuppression(Context *ctx,
                                const ScopedReport &srep,
                                uptr addr) {
-  for (uptr k = 0; k < ctx->fired_suppressions.Size(); k++) {
+  for (uptr k = 0; k < ctx->fired_suppressions.size(); k++) {
     if (ctx->fired_suppressions[k].type != srep.GetReport()->typ)
       continue;
     FiredSuppression *s = &ctx->fired_suppressions[k];
@@ -589,7 +597,7 @@ static bool IsJavaNonsense(const ReportDesc *rep) {
           && frame->module == 0)) {
         if (frame) {
           FiredSuppression supp = {rep->typ, frame->pc, 0};
-          CTX()->fired_suppressions.PushBack(supp);
+          CTX()->fired_suppressions.push_back(supp);
         }
         return true;
       }

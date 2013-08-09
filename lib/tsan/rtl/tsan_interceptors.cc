@@ -77,6 +77,7 @@ const int SIGFPE = 8;
 const int SIGSEGV = 11;
 const int SIGPIPE = 13;
 const int SIGBUS = 7;
+const int SIGSYS = 31;
 void *const MAP_FAILED = (void*)-1;
 const int PTHREAD_BARRIER_SERIAL_THREAD = -1;
 const int MAP_FIXED = 0x10;
@@ -181,8 +182,7 @@ ScopedInterceptor::~ScopedInterceptor() {
     StatInc(thr, StatInt_##func); \
     const uptr caller_pc = GET_CALLER_PC(); \
     ScopedInterceptor si(thr, #func, caller_pc); \
-    const uptr pc = __sanitizer::StackTrace::GetPreviousInstructionPc( \
-        __sanitizer::StackTrace::GetCurrentPc()); \
+    const uptr pc = __sanitizer::StackTrace::GetCurrentPc(); \
     (void)pc; \
 /**/
 
@@ -368,21 +368,29 @@ extern "C" void __tsan_setjmp(uptr sp, uptr mangled_sp) {
 }
 
 // Not called.  Merely to satisfy TSAN_INTERCEPT().
+extern "C" int __interceptor_setjmp(void *env)
+    SANITIZER_INTERFACE_ATTRIBUTE;
 extern "C" int __interceptor_setjmp(void *env) {
   CHECK(0);
   return 0;
 }
 
+extern "C" int __interceptor__setjmp(void *env)
+    SANITIZER_INTERFACE_ATTRIBUTE;
 extern "C" int __interceptor__setjmp(void *env) {
   CHECK(0);
   return 0;
 }
 
+extern "C" int __interceptor_sigsetjmp(void *env)
+    SANITIZER_INTERFACE_ATTRIBUTE;
 extern "C" int __interceptor_sigsetjmp(void *env) {
   CHECK(0);
   return 0;
 }
 
+extern "C" int __interceptor___sigsetjmp(void *env)
+    SANITIZER_INTERFACE_ATTRIBUTE;
 extern "C" int __interceptor___sigsetjmp(void *env) {
   CHECK(0);
   return 0;
@@ -494,15 +502,26 @@ TSAN_INTERCEPTOR(uptr, malloc_usable_size, void *p) {
   invoke_malloc_hook(p, size);  \
   return p;
 
+void *operator new(__sanitizer::uptr size)
+    SANITIZER_INTERFACE_ATTRIBUTE;
 void *operator new(__sanitizer::uptr size) {
   OPERATOR_NEW_BODY(_Znwm);
 }
+
+void *operator new[](__sanitizer::uptr size)
+    SANITIZER_INTERFACE_ATTRIBUTE;
 void *operator new[](__sanitizer::uptr size) {
   OPERATOR_NEW_BODY(_Znam);
 }
+
+void *operator new(__sanitizer::uptr size, std::nothrow_t const&)
+    SANITIZER_INTERFACE_ATTRIBUTE;
 void *operator new(__sanitizer::uptr size, std::nothrow_t const&) {
   OPERATOR_NEW_BODY(_ZnwmRKSt9nothrow_t);
 }
+
+void *operator new[](__sanitizer::uptr size, std::nothrow_t const&)
+    SANITIZER_INTERFACE_ATTRIBUTE;
 void *operator new[](__sanitizer::uptr size, std::nothrow_t const&) {
   OPERATOR_NEW_BODY(_ZnamRKSt9nothrow_t);
 }
@@ -515,15 +534,26 @@ void *operator new[](__sanitizer::uptr size, std::nothrow_t const&) {
   SCOPED_INTERCEPTOR_RAW(mangled_name, ptr);  \
   user_free(thr, pc, ptr);
 
+void operator delete(void *ptr)
+    SANITIZER_INTERFACE_ATTRIBUTE;
 void operator delete(void *ptr) {
   OPERATOR_DELETE_BODY(_ZdlPv);
 }
+
+void operator delete[](void *ptr)
+    SANITIZER_INTERFACE_ATTRIBUTE;
 void operator delete[](void *ptr) {
   OPERATOR_DELETE_BODY(_ZdlPvRKSt9nothrow_t);
 }
+
+void operator delete(void *ptr, std::nothrow_t const&)
+    SANITIZER_INTERFACE_ATTRIBUTE;
 void operator delete(void *ptr, std::nothrow_t const&) {
   OPERATOR_DELETE_BODY(_ZdaPv);
 }
+
+void operator delete[](void *ptr, std::nothrow_t const&)
+    SANITIZER_INTERFACE_ATTRIBUTE;
 void operator delete[](void *ptr, std::nothrow_t const&) {
   OPERATOR_DELETE_BODY(_ZdaPvRKSt9nothrow_t);
 }
@@ -559,30 +589,6 @@ TSAN_INTERCEPTOR(int, memcmp, const void *s1, const void *s2, uptr n) {
   MemoryAccessRange(thr, pc, (uptr)s1, len < n ? len + 1 : n, false);
   MemoryAccessRange(thr, pc, (uptr)s2, len < n ? len + 1 : n, false);
   return res;
-}
-
-TSAN_INTERCEPTOR(int, strcmp, const char *s1, const char *s2) {
-  SCOPED_TSAN_INTERCEPTOR(strcmp, s1, s2);
-  uptr len = 0;
-  for (; s1[len] && s2[len]; len++) {
-    if (s1[len] != s2[len])
-      break;
-  }
-  MemoryAccessRange(thr, pc, (uptr)s1, len + 1, false);
-  MemoryAccessRange(thr, pc, (uptr)s2, len + 1, false);
-  return s1[len] - s2[len];
-}
-
-TSAN_INTERCEPTOR(int, strncmp, const char *s1, const char *s2, uptr n) {
-  SCOPED_TSAN_INTERCEPTOR(strncmp, s1, s2, n);
-  uptr len = 0;
-  for (; len < n && s1[len] && s2[len]; len++) {
-    if (s1[len] != s2[len])
-      break;
-  }
-  MemoryAccessRange(thr, pc, (uptr)s1, len < n ? len + 1 : n, false);
-  MemoryAccessRange(thr, pc, (uptr)s2, len < n ? len + 1 : n, false);
-  return len == n ? 0 : s1[len] - s2[len];
 }
 
 TSAN_INTERCEPTOR(void*, memchr, void *s, int c, uptr n) {
@@ -1450,40 +1456,6 @@ TSAN_INTERCEPTOR(int, pipe2, int *pipefd, int flags) {
   return res;
 }
 
-TSAN_INTERCEPTOR(long_t, readv, int fd, void *vec, int cnt) {
-  SCOPED_TSAN_INTERCEPTOR(readv, fd, vec, cnt);
-  int res = REAL(readv)(fd, vec, cnt);
-  if (res >= 0 && fd >= 0) {
-    FdAcquire(thr, pc, fd);
-  }
-  return res;
-}
-
-TSAN_INTERCEPTOR(long_t, preadv64, int fd, void *vec, int cnt, u64 off) {
-  SCOPED_TSAN_INTERCEPTOR(preadv64, fd, vec, cnt, off);
-  int res = REAL(preadv64)(fd, vec, cnt, off);
-  if (res >= 0 && fd >= 0) {
-    FdAcquire(thr, pc, fd);
-  }
-  return res;
-}
-
-TSAN_INTERCEPTOR(long_t, writev, int fd, void *vec, int cnt) {
-  SCOPED_TSAN_INTERCEPTOR(writev, fd, vec, cnt);
-  if (fd >= 0)
-    FdRelease(thr, pc, fd);
-  int res = REAL(writev)(fd, vec, cnt);
-  return res;
-}
-
-TSAN_INTERCEPTOR(long_t, pwritev64, int fd, void *vec, int cnt, u64 off) {
-  SCOPED_TSAN_INTERCEPTOR(pwritev64, fd, vec, cnt, off);
-  if (fd >= 0)
-    FdRelease(thr, pc, fd);
-  int res = REAL(pwritev64)(fd, vec, cnt, off);
-  return res;
-}
-
 TSAN_INTERCEPTOR(long_t, send, int fd, void *buf, long_t len, int flags) {
   SCOPED_TSAN_INTERCEPTOR(send, fd, buf, len, flags);
   if (fd >= 0)
@@ -1637,7 +1609,7 @@ void ALWAYS_INLINE rtl_generic_sighandler(bool sigact, int sig,
   SignalContext *sctx = SigCtx(thr);
   // Don't mess with synchronous signals.
   if (sig == SIGSEGV || sig == SIGBUS || sig == SIGILL ||
-      sig == SIGABRT || sig == SIGFPE || sig == SIGPIPE ||
+      sig == SIGABRT || sig == SIGFPE || sig == SIGPIPE || sig == SIGSYS ||
       // If we are sending signal to ourselves, we must process it now.
       (sctx && sig == sctx->int_signal_send) ||
       // If we are in blocking function, we can safely process it now
@@ -1712,6 +1684,11 @@ TSAN_INTERCEPTOR(sighandler_t, signal, int sig, sighandler_t h) {
   return old.sa_handler;
 }
 
+TSAN_INTERCEPTOR(int, sigsuspend, const sigset_t *mask) {
+  SCOPED_TSAN_INTERCEPTOR(sigsuspend, mask);
+  return REAL(sigsuspend)(mask);
+}
+
 TSAN_INTERCEPTOR(int, raise, int sig) {
   SCOPED_TSAN_INTERCEPTOR(raise, sig);
   SignalContext *sctx = SigCtx(thr);
@@ -1768,7 +1745,8 @@ static void MlockIsUnsupported() {
   static atomic_uint8_t printed;
   if (atomic_exchange(&printed, 1, memory_order_relaxed))
     return;
-  Printf("INFO: ThreadSanitizer ignores mlock/mlockall/munlock/munlockall\n");
+  if (flags()->verbosity > 0)
+    Printf("INFO: ThreadSanitizer ignores mlock/mlockall/munlock/munlockall\n");
 }
 
 TSAN_INTERCEPTOR(int, mlock, const void *addr, uptr len) {
@@ -1816,12 +1794,16 @@ struct TsanInterceptorContext {
 #undef SANITIZER_INTERCEPT_GETPWNAM_R_AND_FRIENDS
 // Causes interceptor recursion (getaddrinfo() and fopen())
 #undef SANITIZER_INTERCEPT_GETADDRINFO
+#undef SANITIZER_INTERCEPT_GETNAMEINFO
 // Causes interceptor recursion (glob64() calls lstat64())
 #undef SANITIZER_INTERCEPT_GLOB
 
-#define COMMON_INTERCEPTOR_WRITE_RANGE(ctx, ptr, size)                      \
-  MemoryAccessRange(((TsanInterceptorContext *) ctx)->thr,                  \
-                    ((TsanInterceptorContext *) ctx)->pc, (uptr) ptr, size, \
+#define COMMON_INTERCEPTOR_UNPOISON_PARAM(ctx, count) \
+  do {                                                \
+  } while (false)
+#define COMMON_INTERCEPTOR_WRITE_RANGE(ctx, ptr, size)                    \
+  MemoryAccessRange(((TsanInterceptorContext *)ctx)->thr,                 \
+                    ((TsanInterceptorContext *)ctx)->pc, (uptr)ptr, size, \
                     true)
 #define COMMON_INTERCEPTOR_READ_RANGE(ctx, ptr, size)                       \
   MemoryAccessRange(((TsanInterceptorContext *) ctx)->thr,                  \
@@ -1882,6 +1864,7 @@ void ProcessPendingSignals(ThreadState *thr) {
           uptr pc = signal->sigaction ?
               (uptr)sigactions[sig].sa_sigaction :
               (uptr)sigactions[sig].sa_handler;
+          pc += 1;  // return address is expected, OutputReport() will undo this
           stack.Init(&pc, 1);
           ThreadRegistryLock l(ctx->thread_registry);
           ScopedReport rep(ReportTypeErrnoInSignal);
@@ -1952,7 +1935,6 @@ void InitializeInterceptors() {
   TSAN_INTERCEPT(strlen);
   TSAN_INTERCEPT(memset);
   TSAN_INTERCEPT(memcpy);
-  TSAN_INTERCEPT(strcmp);
   TSAN_INTERCEPT(memchr);
   TSAN_INTERCEPT(memrchr);
   TSAN_INTERCEPT(memmove);
@@ -1960,7 +1942,6 @@ void InitializeInterceptors() {
   TSAN_INTERCEPT(strchr);
   TSAN_INTERCEPT(strchrnul);
   TSAN_INTERCEPT(strrchr);
-  TSAN_INTERCEPT(strncmp);
   TSAN_INTERCEPT(strcpy);  // NOLINT
   TSAN_INTERCEPT(strncpy);
   TSAN_INTERCEPT(strstr);
@@ -2049,10 +2030,6 @@ void InitializeInterceptors() {
   TSAN_INTERCEPT(pipe);
   TSAN_INTERCEPT(pipe2);
 
-  TSAN_INTERCEPT(readv);
-  TSAN_INTERCEPT(preadv64);
-  TSAN_INTERCEPT(writev);
-  TSAN_INTERCEPT(pwritev64);
   TSAN_INTERCEPT(send);
   TSAN_INTERCEPT(sendmsg);
   TSAN_INTERCEPT(recv);
@@ -2075,6 +2052,7 @@ void InitializeInterceptors() {
 
   TSAN_INTERCEPT(sigaction);
   TSAN_INTERCEPT(signal);
+  TSAN_INTERCEPT(sigsuspend);
   TSAN_INTERCEPT(raise);
   TSAN_INTERCEPT(kill);
   TSAN_INTERCEPT(pthread_kill);

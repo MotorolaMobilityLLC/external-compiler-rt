@@ -5,6 +5,7 @@ set(SANITIZER_UNITTESTS
   sanitizer_atomic_test.cc
   sanitizer_common_test.cc
   sanitizer_flags_test.cc
+  sanitizer_ioctl_test.cc
   sanitizer_libc_test.cc
   sanitizer_linux_test.cc
   sanitizer_list_test.cc
@@ -15,6 +16,7 @@ set(SANITIZER_UNITTESTS
   sanitizer_stackdepot_test.cc
   sanitizer_stacktrace_test.cc
   sanitizer_stoptheworld_test.cc
+  sanitizer_suppressions_test.cc
   sanitizer_test_main.cc
   sanitizer_thread_registry_test.cc
   )
