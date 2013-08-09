@@ -29,7 +29,7 @@ namespace __sanitizer {
 
 void GetThreadStackTopAndBottom(bool at_initialization, uptr *stack_top,
                                 uptr *stack_bottom) {
-  static const uptr kMaxThreadStackSize = 256 * (1 << 20);  // 256M
+  static const uptr kMaxThreadStackSize = 1 << 30;  // 1Gb
   CHECK(stack_top);
   CHECK(stack_bottom);
   if (at_initialization) {
@@ -63,15 +63,16 @@ void GetThreadStackTopAndBottom(bool at_initialization, uptr *stack_top,
     return;
   }
   pthread_attr_t attr;
+  pthread_attr_init(&attr);
   CHECK_EQ(pthread_getattr_np(pthread_self(), &attr), 0);
   uptr stacksize = 0;
   void *stackaddr = 0;
   pthread_attr_getstack(&attr, &stackaddr, (size_t*)&stacksize);
   pthread_attr_destroy(&attr);
 
+  CHECK_LE(stacksize, kMaxThreadStackSize);  // Sanity check.
   *stack_top = (uptr)stackaddr + stacksize;
   *stack_bottom = (uptr)stackaddr;
-  CHECK(stacksize < kMaxThreadStackSize);  // Sanity check.
 }
 
 // Does not compile for Go because dlsym() requires -ldl
@@ -197,7 +198,7 @@ uptr GetTlsSize() {
 // sizeof(struct thread) from glibc.
 // There has been a report of this being different on glibc 2.11. We don't know
 // when this change happened, so 2.12 is a conservative estimate.
-#if __GNUC_PREREQ(2, 12)
+#if __GLIBC_PREREQ(2, 12)
 const uptr kThreadDescriptorSize = FIRST_32_SECOND_64(1216, 2304);
 #else
 const uptr kThreadDescriptorSize = FIRST_32_SECOND_64(1168, 2304);

@@ -1,10 +1,10 @@
-// RUN: %clangxx_asan -O0 %s -o %t && %t 2>&1 | %symbolize > %t.out
+// RUN: %clangxx_asan -O0 %s -o %t && not %t 2>%t.out
 // RUN: FileCheck %s < %t.out && FileCheck %s --check-prefix=CHECK-%os < %t.out
-// RUN: %clangxx_asan -O1 %s -o %t && %t 2>&1 | %symbolize > %t.out
+// RUN: %clangxx_asan -O1 %s -o %t && not %t 2>%t.out
 // RUN: FileCheck %s < %t.out && FileCheck %s --check-prefix=CHECK-%os < %t.out
-// RUN: %clangxx_asan -O2 %s -o %t && %t 2>&1 | %symbolize > %t.out
+// RUN: %clangxx_asan -O2 %s -o %t && not %t 2>%t.out
 // RUN: FileCheck %s < %t.out && FileCheck %s --check-prefix=CHECK-%os < %t.out
-// RUN: %clangxx_asan -O3 %s -o %t && %t 2>&1 | %symbolize > %t.out
+// RUN: %clangxx_asan -O3 %s -o %t && not %t 2>%t.out
 // RUN: FileCheck %s < %t.out && FileCheck %s --check-prefix=CHECK-%os < %t.out
 
 #include <stdlib.h>
@@ -45,11 +45,11 @@ static void LargeFunction(int *x, int zero) {
 int main(int argc, char **argv) {
   int *x = new int[100];
   LargeFunction(x, argc - 1);
-  // CHECK: {{    #1 0x.* in _?main .*large_func_test.cc:}}[[@LINE-1]]
+  // CHECK: {{    #1 0x.* in main .*large_func_test.cc:}}[[@LINE-1]]
   // CHECK: {{0x.* is located 12 bytes to the right of 400-byte region}}
   // CHECK: {{allocated by thread T0 here:}}
   // CHECK-Linux: {{    #0 0x.* in operator new.*}}
   // CHECK-Darwin: {{    #0 0x.* in .*_Zna.*}}
-  // CHECK: {{    #1 0x.* in _?main .*large_func_test.cc:}}[[@LINE-7]]
+  // CHECK: {{    #1 0x.* in main .*large_func_test.cc:}}[[@LINE-7]]
   delete x;
 }

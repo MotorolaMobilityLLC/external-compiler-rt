@@ -17,11 +17,6 @@
 
 namespace __asan {
 
-FakeStack::FakeStack() {
-  CHECK(REAL(memset));
-  REAL(memset)(this, 0, sizeof(*this));
-}
-
 bool FakeStack::AddrIsInSizeClass(uptr addr, uptr size_class) {
   uptr mem = allocated_size_classes_[size_class];
   uptr size = ClassMmapSize(size_class);
@@ -97,7 +92,10 @@ void FakeStack::Cleanup() {
 }
 
 uptr FakeStack::ClassMmapSize(uptr size_class) {
-  return RoundUpToPowerOfTwo(stack_size_);
+  // Limit allocation size to ClassSize * MaxDepth when running with unlimited
+  // stack.
+  return RoundUpTo(Min(ClassSize(size_class) * kMaxRecursionDepth, stack_size_),
+                   GetPageSizeCached());
 }
 
 void FakeStack::AllocateOneSizeClass(uptr size_class) {
@@ -170,7 +168,8 @@ uptr __asan_stack_malloc(uptr size, uptr real_stack) {
     // TSD is gone, use the real stack.
     return real_stack;
   }
-  uptr ptr = t->fake_stack().AllocateStack(size, real_stack);
+  t->LazyInitFakeStack();
+  uptr ptr = t->fake_stack()->AllocateStack(size, real_stack);
   // Printf("__asan_stack_malloc %p %zu %p\n", ptr, size, real_stack);
   return ptr;
 }

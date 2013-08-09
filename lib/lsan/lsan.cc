@@ -30,6 +30,8 @@ static void InitializeCommonFlags() {
   cf->strip_path_prefix = "";
   cf->fast_unwind_on_malloc = true;
   cf->malloc_context_size = 30;
+  cf->detect_leaks = true;
+  cf->leak_check_at_exit = true;
 
   ParseCommonFlagsFromString(GetEnv("LSAN_OPTIONS"));
 }
@@ -48,6 +50,7 @@ void Init() {
   u32 tid = ThreadCreate(0, 0, true);
   CHECK_EQ(tid, 0);
   ThreadStart(tid, GetTid());
+  SetCurrentThread(tid);
 
   // Start symbolizer process if necessary.
   const char* external_symbolizer = common_flags()->external_symbolizer_path;
@@ -57,7 +60,8 @@ void Init() {
   }
 
   InitCommonLsan();
-  Atexit(DoLeakCheck);
+  if (common_flags()->detect_leaks && common_flags()->leak_check_at_exit)
+    Atexit(DoLeakCheck);
 }
 
 }  // namespace __lsan

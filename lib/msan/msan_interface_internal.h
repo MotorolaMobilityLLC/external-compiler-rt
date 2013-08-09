@@ -83,6 +83,9 @@ SANITIZER_INTERFACE_ATTRIBUTE
 void __msan_set_exit_code(int exit_code);
 
 SANITIZER_INTERFACE_ATTRIBUTE
+void __msan_set_keep_going(int keep_going);
+
+SANITIZER_INTERFACE_ATTRIBUTE
 int __msan_set_poison_in_malloc(int do_poison);
 
 SANITIZER_WEAK_ATTRIBUTE SANITIZER_INTERFACE_ATTRIBUTE
@@ -121,9 +124,6 @@ void __msan_partial_poison(const void* data, void* shadow, uptr size);
 SANITIZER_INTERFACE_ATTRIBUTE
 void __msan_allocated_memory(const void* data, uptr size);
 
-// Unpoison first n function arguments.
-void __msan_unpoison_param(uptr n);
-
 SANITIZER_INTERFACE_ATTRIBUTE
 u16 __sanitizer_unaligned_load16(const uu16 *p);
 
@@ -141,6 +141,33 @@ void __sanitizer_unaligned_store32(uu32 *p, u32 x);
 
 SANITIZER_INTERFACE_ATTRIBUTE
 void __sanitizer_unaligned_store64(uu64 *p, u64 x);
+
+SANITIZER_INTERFACE_ATTRIBUTE
+uptr __msan_get_estimated_allocated_size(uptr size);
+
+SANITIZER_INTERFACE_ATTRIBUTE
+bool __msan_get_ownership(const void *p);
+
+SANITIZER_INTERFACE_ATTRIBUTE
+uptr __msan_get_allocated_size(const void *p);
+
+SANITIZER_INTERFACE_ATTRIBUTE
+uptr __msan_get_current_allocated_bytes();
+
+SANITIZER_INTERFACE_ATTRIBUTE
+uptr __msan_get_heap_size();
+
+SANITIZER_INTERFACE_ATTRIBUTE
+uptr __msan_get_free_bytes();
+
+SANITIZER_INTERFACE_ATTRIBUTE
+uptr __msan_get_unmapped_bytes();
+
+SANITIZER_WEAK_ATTRIBUTE SANITIZER_INTERFACE_ATTRIBUTE
+/* OPTIONAL */ void __msan_malloc_hook(void *ptr, uptr size);
+
+SANITIZER_WEAK_ATTRIBUTE SANITIZER_INTERFACE_ATTRIBUTE
+/* OPTIONAL */ void __msan_free_hook(void *ptr);
 }  // extern "C"
 
 #endif  // MSAN_INTERFACE_INTERNAL_H
