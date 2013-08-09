@@ -29,6 +29,7 @@
 #include "sanitizer_common/sanitizer_allocator.h"
 #include "sanitizer_common/sanitizer_allocator_internal.h"
 #include "sanitizer_common/sanitizer_common.h"
+#include "sanitizer_common/sanitizer_suppressions.h"
 #include "sanitizer_common/sanitizer_thread_registry.h"
 #include "tsan_clock.h"
 #include "tsan_defs.h"
@@ -533,7 +534,8 @@ struct Context {
 
   Vector<RacyStacks> racy_stacks;
   Vector<RacyAddress> racy_addresses;
-  Vector<FiredSuppression> fired_suppressions;
+  // Number of fired suppressions may be large enough.
+  InternalMmapVector<FiredSuppression> fired_suppressions;
 
   Flags flags;
 

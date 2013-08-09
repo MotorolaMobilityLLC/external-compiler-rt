@@ -280,6 +280,9 @@ struct QuarantineCallback {
     if (p != m) {
       uptr *alloc_magic = reinterpret_cast<uptr *>(p);
       CHECK_EQ(alloc_magic[0], kAllocBegMagic);
+      // Clear the magic value, as allocator internals may overwrite the
+      // contents of deallocated chunk, confusing GetAsanChunk lookup.
+      alloc_magic[0] = 0;
       CHECK_EQ(alloc_magic[1], reinterpret_cast<uptr>(m));
     }
 
@@ -420,10 +423,10 @@ static void *Allocate(uptr size, uptr alignment, StackTrace *stack,
     uptr fill_size = Min(size, (uptr)fl.max_malloc_fill_size);
     REAL(memset)(res, fl.malloc_fill_byte, fill_size);
   }
-  if (t && t->lsan_disabled())
-    m->lsan_tag = __lsan::kIgnored;
-  else
-    m->lsan_tag = __lsan::kDirectlyLeaked;
+#if CAN_SANITIZE_LEAKS
+  m->lsan_tag = __lsan::DisabledInThisThread() ? __lsan::kIgnored
+                                               : __lsan::kDirectlyLeaked;
+#endif
   // Must be the last mutation of metadata in this function.
   atomic_store((atomic_uint8_t *)m, CHUNK_ALLOCATED, memory_order_release);
   ASAN_MALLOC_HOOK(res, size);
@@ -715,26 +718,25 @@ void GetAllocatorGlobalRange(uptr *begin, uptr *end) {
   *end = *begin + sizeof(__asan::allocator);
 }
 
-void *PointsIntoChunk(void* p) {
+uptr PointsIntoChunk(void* p) {
   uptr addr = reinterpret_cast<uptr>(p);
   __asan::AsanChunk *m = __asan::GetAsanChunkByAddrFastLocked(addr);
   if (!m) return 0;
   uptr chunk = m->Beg();
   if ((m->chunk_state == __asan::CHUNK_ALLOCATED) && m->AddrIsInside(addr))
-    return reinterpret_cast<void *>(chunk);
+    return chunk;
   return 0;
 }
 
-void *GetUserBegin(void *p) {
+uptr GetUserBegin(uptr chunk) {
   __asan::AsanChunk *m =
-      __asan::GetAsanChunkByAddrFastLocked(reinterpret_cast<uptr>(p));
+      __asan::GetAsanChunkByAddrFastLocked(chunk);
   CHECK(m);
-  return reinterpret_cast<void *>(m->Beg());
+  return m->Beg();
 }
 
-LsanMetadata::LsanMetadata(void *chunk) {
-  uptr addr = reinterpret_cast<uptr>(chunk);
-  metadata_ = reinterpret_cast<void *>(addr - __asan::kChunkHeaderSize);
+LsanMetadata::LsanMetadata(uptr chunk) {
+  metadata_ = reinterpret_cast<void *>(chunk - __asan::kChunkHeaderSize);
 }
 
 bool LsanMetadata::allocated() const {
@@ -762,19 +764,9 @@ u32 LsanMetadata::stack_trace_id() const {
   return m->alloc_context_id;
 }
 
-template <typename Callable> void ForEachChunk(Callable const &callback) {
-  __asan::allocator.ForEachChunk(callback);
+void ForEachChunk(ForEachChunkCallback callback, void *arg) {
+  __asan::allocator.ForEachChunk(callback, arg);
 }
-#if CAN_SANITIZE_LEAKS
-template void ForEachChunk<ProcessPlatformSpecificAllocationsCb>(
-    ProcessPlatformSpecificAllocationsCb const &callback);
-template void ForEachChunk<PrintLeakedCb>(PrintLeakedCb const &callback);
-template void ForEachChunk<CollectLeaksCb>(CollectLeaksCb const &callback);
-template void ForEachChunk<MarkIndirectlyLeakedCb>(
-    MarkIndirectlyLeakedCb const &callback);
-template void ForEachChunk<CollectSuppressedCb>(
-    CollectSuppressedCb const &callback);
-#endif  // CAN_SANITIZE_LEAKS
 
 IgnoreObjectResult IgnoreObjectLocked(const void *p) {
   uptr addr = reinterpret_cast<uptr>(p);
@@ -790,24 +782,6 @@ IgnoreObjectResult IgnoreObjectLocked(const void *p) {
   }
 }
 }  // namespace __lsan
-
-extern "C" {
-SANITIZER_INTERFACE_ATTRIBUTE
-void __lsan_disable() {
-  __asan_init();
-  __asan::AsanThread *t = __asan::GetCurrentThread();
-  CHECK(t);
-  t->disable_lsan();
-}
-
-SANITIZER_INTERFACE_ATTRIBUTE
-void __lsan_enable() {
-  __asan_init();
-  __asan::AsanThread *t = __asan::GetCurrentThread();
-  CHECK(t);
-  t->enable_lsan();
-}
-}  // extern "C"
 
 // ---------------------- Interface ---------------- {{{1
 using namespace __asan;  // NOLINT
