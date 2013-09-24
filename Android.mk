@@ -202,7 +202,9 @@ define get-libcompiler-rt-source-files
   $(if $(findstring $(1),arm),$(call get-libcompiler-rt-arm-source-files),
       $(if $(findstring $(1),mips),$(call get-libcompiler-rt-mips-source-files),
           $(if $(findstring $(1),x86),$(call get-libcompiler-rt-x86-source-files),
-  $(error Unsupported ARCH $(1)))))
+             $(if $(findstring $(1),x86_64),$(call get-libcompiler-rt-x86-source-files),
+                 $(if $(findstring $(1),x32),$(call get-libcompiler-rt-x86-source-files),
+  $(error Unsupported ARCH $(1)))))))
 endef
 
 # $(1): source list
