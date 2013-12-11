@@ -339,12 +339,19 @@ include $(BUILD_STATIC_LIBRARY)
 #=====================================================================
 # Device Static Library: libcompiler_rt
 #=====================================================================
+#TODOAArch64: Enable compiler-rt build
+ifneq ($(TARGET_ARCH),aarch64)
 $(eval $(call build-libcompiler-rt,target,static))
+endif
 
 #=====================================================================
 # Device Shared Library: libcompiler_rt
 #=====================================================================
+
+#TODOAArch64: Enable libcompiler_rt build
+ifneq ($(TARGET_ARCH),aarch64)
 $(eval $(call build-libcompiler-rt,target,shared))
+endif
 
 # Build ASan
 include $(LOCAL_PATH)/lib/asan/Android.mk
