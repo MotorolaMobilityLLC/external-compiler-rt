@@ -173,6 +173,8 @@ libcompiler_rt_arm_SRC_FILES := \
 libcompiler_rt_mips_SRC_FILES := # nothing to add
 
 # X86-specific runtimes
+#
+# We don't support x86-64 right now
 libcompiler_rt_x86_SRC_FILES := \
   lib/i386/ashldi3.S \
   lib/i386/ashrdi3.S \
@@ -189,15 +191,6 @@ libcompiler_rt_x86_SRC_FILES := \
   lib/i386/udivdi3.S \
   lib/i386/umoddi3.S
 
-# X86_64-specific runtimes
-libcompiler_rt_x86_64_SRC_FILES := \
-  lib/x86_64/floatundixf.S \
-  lib/x86_64/floatdisf.c \
-  lib/x86_64/floatdidf.c \
-  lib/x86_64/floatdixf.c \
-  lib/x86_64/floatundisf.S \
-  lib/x86_64/floatundidf.S
-
 # The following list contains functions that are not available in libgcc.a, so
 # we potentially need them when using a Clang-built component (e.g., -ftrapv
 # with 64-bit integer multiplies. See http://llvm.org/bugs/show_bug.cgi?id=14469.)
@@ -209,7 +202,7 @@ define get-libcompiler-rt-source-files
   $(if $(findstring $(1),arm),$(call get-libcompiler-rt-arm-source-files),
       $(if $(findstring $(1),mips),$(call get-libcompiler-rt-mips-source-files),
           $(if $(findstring $(1),x86),$(call get-libcompiler-rt-x86-source-files),
-             $(if $(findstring $(1),x86_64),$(call get-libcompiler-rt-x86_64-source-files),
+             $(if $(findstring $(1),x86_64),$(call get-libcompiler-rt-x86-source-files),
                  $(if $(findstring $(1),x32),$(call get-libcompiler-rt-x86-source-files),
   $(error Unsupported ARCH $(1)))))))
 endef
@@ -217,12 +210,11 @@ endef
 # $(1): source list
 # $(2): arch
 #
-# If lib/<arch>/X.[cS] is included in the source list, we should filter out lib/X.c
+# If lib/<arch>/X.S is included in the source list, we should filter out lib/X.c
 # in the result source list (i.e., use the one optimized for the arch.) Otherwise
 # there'll be multiple definitions for one symbol.
 define filter-libcompiler-rt-common-source-files
-  $(filter-out $(patsubst lib/$(strip $(2))/%.c lib/$(strip $(2))/%.S,lib/%.c,\
-                          $(filter %.c %.S,$(1))),$(1))
+  $(filter-out $(patsubst lib/$(strip $(2))/%.S,lib/%.c,$(filter %.S,$(1))),$(1))
 endef
 
 define get-libcompiler-rt-arm-common-source-files
@@ -260,12 +252,6 @@ define get-libcompiler-rt-x86-source-files
   $(call filter-libcompiler-rt-common-source-files,
       $(libcompiler_rt_common_SRC_FILES) \
       $(libcompiler_rt_x86_SRC_FILES),i386)
-endef
-
-define get-libcompiler-rt-x86_64-source-files
-  $(call filter-libcompiler-rt-common-source-files,
-      $(libcompiler_rt_common_SRC_FILES) \
-      $(libcompiler_rt_x86_64_SRC_FILES),x86_64)
 endef
 
 # $(1): target or host
