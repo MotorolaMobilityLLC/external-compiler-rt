@@ -356,7 +356,8 @@ include $(BUILD_STATIC_LIBRARY)
 # Device Static Library: libcompiler_rt
 #=====================================================================
 #TODOArm64: Enable compiler-rt build
-ifneq ($(TARGET_ARCH),arm64)
+#TODOMips64: Enable compiler-rt build
+ifeq ($(filter $(TARGET_ARCH),arm64 mips64),)
 $(eval $(call build-libcompiler-rt,target,static))
 endif
 
@@ -364,8 +365,9 @@ endif
 # Device Shared Library: libcompiler_rt
 #=====================================================================
 
-#TODOArm64: Enable libcompiler_rt build
-ifneq ($(TARGET_ARCH),arm64)
+#TODOArm64: Enable compiler-rt build
+#TODOMips64: Enable compiler-rt build
+ifeq ($(filter $(TARGET_ARCH),arm64 mips64),)
 $(eval $(call build-libcompiler-rt,target,shared))
 endif
 
