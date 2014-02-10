@@ -896,6 +896,7 @@ POST_SYSCALL(newfstat)(long res, long fd, void *statbuf) {
   }
 }
 
+#if !SANITIZER_ANDROID
 PRE_SYSCALL(ustat)(long dev, void *ubuf) {}
 
 POST_SYSCALL(ustat)(long res, long dev, void *ubuf) {
@@ -903,6 +904,7 @@ POST_SYSCALL(ustat)(long res, long dev, void *ubuf) {
     if (ubuf) POST_WRITE(ubuf, struct_ustat_sz);
   }
 }
+#endif  // !SANITIZER_ANDROID
 
 PRE_SYSCALL(stat64)(const void *filename, void *statbuf) {
   if (filename)
