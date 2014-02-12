@@ -73,6 +73,8 @@ void __msan_set_origin(const void *a, uptr size, u32 origin);
 SANITIZER_INTERFACE_ATTRIBUTE
 void __msan_set_alloca_origin(void *a, uptr size, const char *descr);
 SANITIZER_INTERFACE_ATTRIBUTE
+void __msan_set_alloca_origin4(void *a, uptr size, const char *descr, uptr pc);
+SANITIZER_INTERFACE_ATTRIBUTE
 u32 __msan_get_origin(const void *a);
 
 SANITIZER_INTERFACE_ATTRIBUTE
@@ -88,7 +90,7 @@ void __msan_set_keep_going(int keep_going);
 SANITIZER_INTERFACE_ATTRIBUTE
 int __msan_set_poison_in_malloc(int do_poison);
 
-SANITIZER_WEAK_ATTRIBUTE SANITIZER_INTERFACE_ATTRIBUTE
+SANITIZER_INTERFACE_ATTRIBUTE SANITIZER_WEAK_ATTRIBUTE
 /* OPTIONAL */ const char* __msan_default_options();
 
 // For testing.
@@ -146,7 +148,7 @@ SANITIZER_INTERFACE_ATTRIBUTE
 uptr __msan_get_estimated_allocated_size(uptr size);
 
 SANITIZER_INTERFACE_ATTRIBUTE
-bool __msan_get_ownership(const void *p);
+int __msan_get_ownership(const void *p);
 
 SANITIZER_INTERFACE_ATTRIBUTE
 uptr __msan_get_allocated_size(const void *p);
@@ -163,10 +165,10 @@ uptr __msan_get_free_bytes();
 SANITIZER_INTERFACE_ATTRIBUTE
 uptr __msan_get_unmapped_bytes();
 
-SANITIZER_WEAK_ATTRIBUTE SANITIZER_INTERFACE_ATTRIBUTE
+SANITIZER_INTERFACE_ATTRIBUTE SANITIZER_WEAK_ATTRIBUTE
 /* OPTIONAL */ void __msan_malloc_hook(void *ptr, uptr size);
 
-SANITIZER_WEAK_ATTRIBUTE SANITIZER_INTERFACE_ATTRIBUTE
+SANITIZER_INTERFACE_ATTRIBUTE SANITIZER_WEAK_ATTRIBUTE
 /* OPTIONAL */ void __msan_free_hook(void *ptr);
 }  // extern "C"
 
