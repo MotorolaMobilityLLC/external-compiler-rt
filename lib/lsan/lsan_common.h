@@ -135,6 +135,8 @@ void UnlockThreadRegistry();
 bool GetThreadRangesLocked(uptr os_id, uptr *stack_begin, uptr *stack_end,
                            uptr *tls_begin, uptr *tls_end,
                            uptr *cache_begin, uptr *cache_end);
+void ForEachExtraStackRange(uptr os_id, RangeIteratorCallback callback,
+                            void *arg);
 // If called from the main thread, updates the main thread's TID in the thread
 // registry. We need this to handle processes that fork() without a subsequent
 // exec(), which invalidates the recorded TID. To update it, we must call
@@ -166,10 +168,11 @@ class LsanMetadata {
 }  // namespace __lsan
 
 extern "C" {
-int __lsan_is_turned_off() SANITIZER_WEAK_ATTRIBUTE
-    SANITIZER_INTERFACE_ATTRIBUTE;
-const char *__lsan_default_suppressions() SANITIZER_WEAK_ATTRIBUTE
-    SANITIZER_INTERFACE_ATTRIBUTE;
+SANITIZER_INTERFACE_ATTRIBUTE SANITIZER_WEAK_ATTRIBUTE
+int __lsan_is_turned_off();
+
+SANITIZER_INTERFACE_ATTRIBUTE SANITIZER_WEAK_ATTRIBUTE
+const char *__lsan_default_suppressions();
 }  // extern "C"
 
 #endif  // LSAN_COMMON_H
