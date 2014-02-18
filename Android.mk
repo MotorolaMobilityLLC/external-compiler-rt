@@ -270,73 +270,6 @@ define get-libcompiler-rt-x86_64-source-files
       $(libcompiler_rt_x86_64_SRC_FILES),x86_64)
 endef
 
-# $(1): target or host
-# $(2): static or shared
-define build-libcompiler-rt
-  ifneq ($(1),target)
-    ifneq ($(1),host)
-      $$(error expected target or host for argument 1, received $(1))
-    endif
-  endif
-  ifneq ($(2),static)
-    ifneq ($(2),shared)
-      $$(error expected static or shared for argument 2, received $(2))
-    endif
-  endif
-
-  target_or_host := $(1)
-  static_or_shared := $(2)
-
-  arch :=
-  ifeq ($$(target_or_host),target)
-    arch := $(TARGET_ARCH)
-  else
-    arch := $(HOST_ARCH)
-  endif
-
-  include $(CLEAR_VARS)
-
-  LOCAL_MODULE := libcompiler_rt
-  LOCAL_MODULE_TAGS := optional
-
-  ifeq ($$(static_or_shared),static)
-    LOCAL_MODULE_CLASS := STATIC_LIBRARIES
-  else
-    LOCAL_MODULE_CLASS := SHARED_LIBRARIES
-  endif
-
-  # TODO: Fix -integrated-as
-  # LOCAL_CFLAGS := -integrated-as
-
-  # Add -D__ARM_EABI__ for ARM
-  ifeq ($$(arch),arm)
-    LOCAL_CFLAGS += -D__ARM_EABI__
-  endif
-
-  # Use MC assembler to compile assembly
-  LOCAL_ASFLAGS += -integrated-as
-
-  # Use Clang to compile libcompiler_rt
-  LOCAL_CLANG := true
-  LOCAL_SRC_FILES := $$(call get-libcompiler-rt-source-files,$$(arch))
-  LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
-
-  ifeq ($$(target_or_host),target)
-    ifeq ($$(static_or_shared),static)
-      include $(BUILD_STATIC_LIBRARY)
-    else
-      include $(BUILD_SHARED_LIBRARY)
-    endif
-  else
-    LOCAL_IS_HOST_MODULE := true
-    ifeq ($$(static_or_shared),static)
-      include $(BUILD_HOST_STATIC_LIBRARY)
-    else
-      include $(BUILD_HOST_SHARED_LIBRARY)
-    endif
-  endif
-endef
-
 #=====================================================================
 # Device Static Library: libcompiler_rt-extras
 #=====================================================================
@@ -355,21 +288,42 @@ include $(BUILD_STATIC_LIBRARY)
 #=====================================================================
 # Device Static Library: libcompiler_rt
 #=====================================================================
-#TODOArm64: Enable compiler-rt build
-#TODOMips64: Enable compiler-rt build
-ifeq ($(filter $(TARGET_ARCH),arm64 mips64),)
-$(eval $(call build-libcompiler-rt,target,static))
+
+include $(CLEAR_VARS)
+
+ifeq ($(TARGET_ARCH),arm64)
+$(warning TODOArm64: Enable compiler-rt build)
 endif
+
+ifeq ($(TARGET_ARCH),mips64)
+$(warning TODOMips64: Enable compiler-rt build)
+endif
+
+LOCAL_MODULE := libcompiler_rt
+LOCAL_CFLAGS_arm += -D__ARM_EABI__
+LOCAL_ASFLAGS := -integrated-as
+LOCAL_CLANG := true
+LOCAL_SRC_FILES_arm := $(call get-libcompiler-rt-source-files,arm)
+LOCAL_SRC_FILES_mips := $(call get-libcompiler-rt-source-files,mips)
+LOCAL_SRC_FILES_x86 := $(call get-libcompiler-rt-source-files,x86)
+LOCAL_SRC_FILES_x86_64 := $(call get-libcompiler-rt-source-files,x86_64)
+LOCAL_MODULE_TARGET_ARCH := arm mips x86 x86_64
+LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
+
+include $(BUILD_STATIC_LIBRARY)
 
 #=====================================================================
 # Device Shared Library: libcompiler_rt
 #=====================================================================
 
-#TODOArm64: Enable compiler-rt build
-#TODOMips64: Enable compiler-rt build
-ifeq ($(filter $(TARGET_ARCH),arm64 mips64),)
-$(eval $(call build-libcompiler-rt,target,shared))
-endif
+include $(CLEAR_VARS)
+
+LOCAL_MODULE := libcompiler_rt
+LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
+LOCAL_WHOLE_STATIC_LIBRARIES := libcompiler_rt
+LOCAL_MODULE_TARGET_ARCH := arm mips x86 x86_64
+
+include $(BUILD_SHARED_LIBRARY)
 
 # Build ASan
 include $(LOCAL_PATH)/lib/asan/Android.mk
