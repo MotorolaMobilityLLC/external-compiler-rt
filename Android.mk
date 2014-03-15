@@ -280,9 +280,6 @@ define get-libcompiler-rt-x86_64-source-files
       $(libcompiler_rt_x86_64_SRC_FILES),x86_64)
 endef
 
-# Don't build compiler-rt without clang
-ifneq ($(WITHOUT_TARGET_CLANG), true)
-
 #=====================================================================
 # Device Static Library: libcompiler_rt-extras
 #=====================================================================
@@ -297,6 +294,9 @@ LOCAL_SRC_FILES := $(libcompiler_rt_extras_SRC_FILES)
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 
 include $(BUILD_STATIC_LIBRARY)
+
+# Don't build compiler-rt without clang
+ifneq ($(WITHOUT_TARGET_CLANG), true)
 
 #=====================================================================
 # Device Static Library: libcompiler_rt
