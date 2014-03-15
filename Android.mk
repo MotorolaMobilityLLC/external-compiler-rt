@@ -280,6 +280,9 @@ define get-libcompiler-rt-x86_64-source-files
       $(libcompiler_rt_x86_64_SRC_FILES),x86_64)
 endef
 
+# Don't build compiler-rt without clang
+ifneq ($(WITHOUT_TARGET_CLANG), true)
+
 #=====================================================================
 # Device Static Library: libcompiler_rt-extras
 #=====================================================================
@@ -334,3 +337,5 @@ include $(BUILD_SHARED_LIBRARY)
 
 # Build ASan
 include $(LOCAL_PATH)/lib/asan/Android.mk
+
+endif
