@@ -169,6 +169,9 @@ libcompiler_rt_arm_SRC_FILES := \
   lib/arm/udivsi3.S \
   lib/arm/umodsi3.S
 
+# ARM64-specific runtimes
+libcompiler_rt_arm64_SRC_FILES :=
+
 # MIPS-specific runtimes
 libcompiler_rt_mips_SRC_FILES := # nothing to add
 
@@ -211,7 +214,8 @@ define get-libcompiler-rt-source-files
           $(if $(findstring $(1),x86),$(call get-libcompiler-rt-x86-source-files),
              $(if $(findstring $(1),x86_64),$(call get-libcompiler-rt-x86_64-source-files),
                  $(if $(findstring $(1),x32),$(call get-libcompiler-rt-x86-source-files),
-  $(error Unsupported ARCH $(1)))))))
+                    $(if $(findstring $(1),arm64),$(call get-libcompiler-rt-arm64-source-files),
+  $(error Unsupported ARCH $(1))))))))
 endef
 
 # $(1): source list
@@ -250,6 +254,12 @@ define get-libcompiler-rt-arm-source-files
       $(call add-libcompiler-rt-arm-vfp-source-files,
           $(call get-libcompiler-rt-arm-common-source-files)),
       $(call get-libcompiler-rt-arm-common-source-files))
+endef
+
+define get-libcompiler-rt-arm64-source-files
+  $(call filter-libcompiler-rt-common-source-files,
+      $(libcompiler_rt_common_SRC_FILES) \
+      $(libcompiler_rt_arm64_SRC_FILES),arm64)
 endef
 
 define get-libcompiler-rt-mips-source-files
@@ -291,10 +301,6 @@ include $(BUILD_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)
 
-ifeq ($(TARGET_ARCH),arm64)
-$(warning TODOArm64: Enable compiler-rt build)
-endif
-
 ifeq ($(TARGET_ARCH),mips64)
 $(warning TODOMips64: Enable compiler-rt build)
 endif
@@ -304,10 +310,11 @@ LOCAL_CFLAGS_arm += -D__ARM_EABI__
 LOCAL_ASFLAGS := -integrated-as
 LOCAL_CLANG := true
 LOCAL_SRC_FILES_arm := $(call get-libcompiler-rt-source-files,arm)
+LOCAL_SRC_FILES_arm64 := $(call get-libcompiler-rt-source-files,arm64)
 LOCAL_SRC_FILES_mips := $(call get-libcompiler-rt-source-files,mips)
 LOCAL_SRC_FILES_x86 := $(call get-libcompiler-rt-source-files,x86)
 LOCAL_SRC_FILES_x86_64 := $(call get-libcompiler-rt-source-files,x86_64)
-LOCAL_MODULE_TARGET_ARCH := arm mips x86 x86_64
+LOCAL_MODULE_TARGET_ARCH := arm arm64 mips x86 x86_64
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 
 include $(BUILD_STATIC_LIBRARY)
@@ -321,7 +328,7 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := libcompiler_rt
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 LOCAL_WHOLE_STATIC_LIBRARIES := libcompiler_rt
-LOCAL_MODULE_TARGET_ARCH := arm mips x86 x86_64
+LOCAL_MODULE_TARGET_ARCH := arm arm64 mips x86 x86_64
 
 include $(BUILD_SHARED_LIBRARY)
 
