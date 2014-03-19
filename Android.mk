@@ -21,7 +21,6 @@ LOCAL_PATH := $(call my-dir)
 #
 # Skip apple_versioning.c since it is unused.
 # Skip atomic.c since it needs to be built separately according to the docs.
-# Skip clear_cache.c since it redefines a system function on Android.
 # Skip gcc_personality_v0.c since it depends on libunwind.
 libcompiler_rt_common_SRC_FILES := \
   lib/absvdi2.c \
@@ -36,6 +35,7 @@ libcompiler_rt_common_SRC_FILES := \
   lib/ashlti3.c \
   lib/ashrdi3.c \
   lib/ashrti3.c \
+  lib/clear_cache.c \
   lib/clzdi2.c \
   lib/clzsi2.c \
   lib/clzti2.c \
