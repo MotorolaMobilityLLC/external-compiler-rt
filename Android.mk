@@ -323,6 +323,17 @@ LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include $(BUILD_STATIC_LIBRARY)
 
 #=====================================================================
+# Device Static Library: libprofile_rt
+#=====================================================================
+
+include $(CLEAR_VARS)
+
+LOCAL_MODULE = libprofile_rt
+LOCAL_SRC_FILES = lib/profile/GCDAProfiling.c
+
+include $(BUILD_STATIC_LIBRARY)
+
+#=====================================================================
 # Device Shared Library: libcompiler_rt
 #=====================================================================
 
