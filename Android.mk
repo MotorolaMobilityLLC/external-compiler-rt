@@ -323,6 +323,20 @@ LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include $(BUILD_STATIC_LIBRARY)
 
 #=====================================================================
+# Host Static Library: libcompiler_rt
+#=====================================================================
+
+include $(CLEAR_VARS)
+
+LOCAL_MODULE := libcompiler_rt
+LOCAL_ASFLAGS := -integrated-as
+LOCAL_CLANG := true
+LOCAL_SRC_FILES := $(call get-libcompiler-rt-source-files,x86_64)
+LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
+
+include $(BUILD_HOST_STATIC_LIBRARY)
+
+#=====================================================================
 # Device Static Library: libprofile_rt
 #=====================================================================
 
@@ -348,5 +362,20 @@ include $(BUILD_SHARED_LIBRARY)
 
 # Build ASan
 include $(LOCAL_PATH)/lib/asan/Android.mk
+
+#=====================================================================
+# Host Shared Library: libcompiler_rt
+#=====================================================================
+
+include $(CLEAR_VARS)
+
+LOCAL_MODULE := libcompiler_rt
+LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
+LOCAL_WHOLE_STATIC_LIBRARIES := libcompiler_rt
+LOCAL_CPPFLAGS := -nostdinc++
+LOCAL_LDFLAGS := -nodefaultlibs
+LOCAL_LDLIBS := -lc -lm
+
+include $(BUILD_HOST_SHARED_LIBRARY)
 
 endif
