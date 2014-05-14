@@ -17,6 +17,8 @@
 
 LOCAL_PATH := $(call my-dir)
 
+ifeq (,$(TARGET_BUILD_APPS))
+
 # The following list contains platform-independent functionalities.
 #
 # Skip apple_versioning.c since it is unused.
@@ -379,3 +381,5 @@ LOCAL_LDLIBS := -lc -lm
 include $(BUILD_HOST_SHARED_LIBRARY)
 
 endif
+
+endif # TARGET_BUILD_APPS only
