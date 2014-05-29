@@ -15,11 +15,28 @@
 #include "sanitizer_common/sanitizer_allocator.h"
 #include "sanitizer_common/sanitizer_stackdepot.h"
 #include "msan.h"
+#include "msan_allocator.h"
+#include "msan_chained_origin_depot.h"
+#include "msan_origin.h"
+#include "msan_thread.h"
 
 namespace __msan {
 
 struct Metadata {
   uptr requested_size;
+};
+
+struct MsanMapUnmapCallback {
+  void OnMap(uptr p, uptr size) const {}
+  void OnUnmap(uptr p, uptr size) const {
+    __msan_unpoison((void *)p, size);
+
+    // We are about to unmap a chunk of user memory.
+    // Mark the corresponding shadow memory as not needed.
+    FlushUnneededShadowMemory(MEM_TO_SHADOW(p), size);
+    if (__msan_get_track_origins())
+      FlushUnneededShadowMemory(MEM_TO_ORIGIN(p), size);
+  }
 };
 
 static const uptr kAllocatorSpace = 0x600000000000ULL;
@@ -28,14 +45,16 @@ static const uptr kMetadataSize  = sizeof(Metadata);
 static const uptr kMaxAllowedMallocSize = 8UL << 30;
 
 typedef SizeClassAllocator64<kAllocatorSpace, kAllocatorSize, kMetadataSize,
-                             DefaultSizeClassMap> PrimaryAllocator;
+                             DefaultSizeClassMap,
+                             MsanMapUnmapCallback> PrimaryAllocator;
 typedef SizeClassAllocatorLocalCache<PrimaryAllocator> AllocatorCache;
-typedef LargeMmapAllocator<> SecondaryAllocator;
+typedef LargeMmapAllocator<MsanMapUnmapCallback> SecondaryAllocator;
 typedef CombinedAllocator<PrimaryAllocator, AllocatorCache,
                           SecondaryAllocator> Allocator;
 
-static THREADLOCAL AllocatorCache cache;
 static Allocator allocator;
+static AllocatorCache fallback_allocator_cache;
+static SpinMutex fallback_mutex;
 
 static int inited = 0;
 
@@ -46,35 +65,51 @@ static inline void Init() {
   allocator.Init();
 }
 
-void MsanAllocatorThreadFinish() {
-  allocator.SwallowCache(&cache);
+AllocatorCache *GetAllocatorCache(MsanThreadLocalMallocStorage *ms) {
+  CHECK(ms);
+  CHECK_LE(sizeof(AllocatorCache), sizeof(ms->allocator_cache));
+  return reinterpret_cast<AllocatorCache *>(ms->allocator_cache);
 }
 
-static void *MsanAllocate(StackTrace *stack, uptr size,
-                          uptr alignment, bool zeroise) {
+void MsanThreadLocalMallocStorage::CommitBack() {
+  allocator.SwallowCache(GetAllocatorCache(this));
+}
+
+static void *MsanAllocate(StackTrace *stack, uptr size, uptr alignment,
+                          bool zeroise) {
   Init();
   if (size > kMaxAllowedMallocSize) {
     Report("WARNING: MemorySanitizer failed to allocate %p bytes\n",
            (void *)size);
     return AllocatorReturnNull();
   }
-  void *res = allocator.Allocate(&cache, size, alignment, false);
-  Metadata *meta = reinterpret_cast<Metadata*>(allocator.GetMetaData(res));
+  MsanThread *t = GetCurrentThread();
+  void *allocated;
+  if (t) {
+    AllocatorCache *cache = GetAllocatorCache(&t->malloc_storage());
+    allocated = allocator.Allocate(cache, size, alignment, false);
+  } else {
+    SpinMutexLock l(&fallback_mutex);
+    AllocatorCache *cache = &fallback_allocator_cache;
+    allocated = allocator.Allocate(cache, size, alignment, false);
+  }
+  Metadata *meta =
+      reinterpret_cast<Metadata *>(allocator.GetMetaData(allocated));
   meta->requested_size = size;
   if (zeroise) {
-    __msan_clear_and_unpoison(res, size);
+    __msan_clear_and_unpoison(allocated, size);
   } else if (flags()->poison_in_malloc) {
-    __msan_poison(res, size);
+    __msan_poison(allocated, size);
     if (__msan_get_track_origins()) {
       u32 stack_id = StackDepotPut(stack->trace, stack->size);
       CHECK(stack_id);
-      CHECK_EQ((stack_id >> 31),
-               0);  // Higher bit is occupied by stack origins.
-      __msan_set_origin(res, size, stack_id);
+      u32 id;
+      ChainedOriginDepotPut(stack_id, Origin::kHeapRoot, &id);
+      __msan_set_origin(allocated, size, Origin(id, 1).raw_id());
     }
   }
-  MSAN_MALLOC_HOOK(res, size);
-  return res;
+  MSAN_MALLOC_HOOK(allocated, size);
+  return allocated;
 }
 
 void MsanDeallocate(StackTrace *stack, void *p) {
@@ -91,12 +126,20 @@ void MsanDeallocate(StackTrace *stack, void *p) {
     if (__msan_get_track_origins()) {
       u32 stack_id = StackDepotPut(stack->trace, stack->size);
       CHECK(stack_id);
-      CHECK_EQ((stack_id >> 31),
-               0);  // Higher bit is occupied by stack origins.
-      __msan_set_origin(p, size, stack_id);
+      u32 id;
+      ChainedOriginDepotPut(stack_id, Origin::kHeapRoot, &id);
+      __msan_set_origin(p, size,  Origin(id, 1).raw_id());
     }
   }
-  allocator.Deallocate(&cache, p);
+  MsanThread *t = GetCurrentThread();
+  if (t) {
+    AllocatorCache *cache = GetAllocatorCache(&t->malloc_storage());
+    allocator.Deallocate(cache, p);
+  } else {
+    SpinMutexLock l(&fallback_mutex);
+    AllocatorCache *cache = &fallback_allocator_cache;
+    allocator.Deallocate(cache, p);
+  }
 }
 
 void *MsanReallocate(StackTrace *stack, void *old_p, uptr new_size,
