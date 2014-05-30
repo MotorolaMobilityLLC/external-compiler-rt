@@ -24,6 +24,7 @@ ASAN_HAS_EXCEPTIONS=1
 ASAN_FLEXIBLE_MAPPING_AND_OFFSET=0
 
 asan_rtl_files := \
+	asan_activation.cc	\
 	asan_allocator2.cc	\
 	asan_fake_stack.cc \
 	asan_globals.cc	\
@@ -46,28 +47,36 @@ asan_rtl_files := \
 	../sanitizer_common/sanitizer_allocator.cc \
 	../sanitizer_common/sanitizer_common.cc \
 	../sanitizer_common/sanitizer_common_libcdep.cc \
-	../sanitizer_common/sanitizer_coverage.cc \
+	../sanitizer_common/sanitizer_coverage_libcdep.cc \
+	../sanitizer_common/sanitizer_coverage_mapping_libcdep.cc \
+	../sanitizer_common/sanitizer_deadlock_detector1.cc \
+	../sanitizer_common/sanitizer_deadlock_detector2.cc \
 	../sanitizer_common/sanitizer_flags.cc \
 	../sanitizer_common/sanitizer_libc.cc \
 	../sanitizer_common/sanitizer_libignore.cc \
 	../sanitizer_common/sanitizer_linux.cc \
 	../sanitizer_common/sanitizer_linux_libcdep.cc \
 	../sanitizer_common/sanitizer_mac.cc \
+	../sanitizer_common/sanitizer_persistent_allocator.cc \
 	../sanitizer_common/sanitizer_platform_limits_linux.cc \
 	../sanitizer_common/sanitizer_platform_limits_posix.cc \
 	../sanitizer_common/sanitizer_posix.cc \
 	../sanitizer_common/sanitizer_posix_libcdep.cc \
 	../sanitizer_common/sanitizer_printf.cc \
+	../sanitizer_common/sanitizer_procmaps_linux.cc \
+	../sanitizer_common/sanitizer_procmaps_mac.cc \
 	../sanitizer_common/sanitizer_stackdepot.cc \
 	../sanitizer_common/sanitizer_stacktrace.cc \
 	../sanitizer_common/sanitizer_stacktrace_libcdep.cc \
 	../sanitizer_common/sanitizer_stoptheworld_linux_libcdep.cc \
 	../sanitizer_common/sanitizer_suppressions.cc \
 	../sanitizer_common/sanitizer_symbolizer.cc \
+	../sanitizer_common/sanitizer_symbolizer_libbacktrace.cc \
 	../sanitizer_common/sanitizer_symbolizer_libcdep.cc \
 	../sanitizer_common/sanitizer_symbolizer_posix_libcdep.cc \
 	../sanitizer_common/sanitizer_symbolizer_win.cc \
 	../sanitizer_common/sanitizer_thread_registry.cc \
+	../sanitizer_common/sanitizer_tls_get_addr.cc \
 	../sanitizer_common/sanitizer_win.cc
 
 asan_rtl_cflags := \
@@ -101,7 +110,8 @@ asan_test_cflags := \
 	-Wno-non-virtual-dtor \
 	-Wno-sign-compare \
 	-Wno-unused-parameter \
-	-D__WORDSIZE=32
+	-D__WORDSIZE=32 \
+	-std=c++11
 
 
 include $(CLEAR_VARS)
@@ -129,7 +139,7 @@ LOCAL_C_INCLUDES := \
 LOCAL_CFLAGS += $(asan_rtl_cflags)
 LOCAL_SRC_FILES := $(asan_rtl_files)
 LOCAL_CPP_EXTENSION := .cc
-LOCAL_SHARED_LIBRARIES := libc libdl
+LOCAL_SHARED_LIBRARIES := liblog libc libdl
 LOCAL_CLANG := true
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include $(BUILD_SHARED_LIBRARY)
@@ -140,12 +150,12 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := asanwrapper
 LOCAL_MODULE_TAGS := eng
 LOCAL_C_INCLUDES := \
-        bionic \
-        external/stlport/stlport
+        bionic
 LOCAL_SRC_FILES := asanwrapper.cc
 LOCAL_CPP_EXTENSION := .cc
-LOCAL_SHARED_LIBRARIES := libstlport libc
+LOCAL_SHARED_LIBRARIES += libc
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
+include external/libcxx/libcxx.mk
 
 include $(BUILD_EXECUTABLE)
 
@@ -156,7 +166,6 @@ LOCAL_MODULE := libasan_noinst_test
 LOCAL_MODULE_TAGS := tests
 LOCAL_C_INCLUDES := \
         bionic \
-        external/stlport/stlport \
         external/gtest/include \
         external/compiler-rt/include \
         external/compiler-rt/lib \
@@ -174,6 +183,8 @@ LOCAL_SRC_FILES := tests/asan_noinst_test.cc tests/asan_test_main.cc
 LOCAL_CPP_EXTENSION := .cc
 LOCAL_CLANG := true
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
+include external/libcxx/libcxx.mk
+
 include $(BUILD_STATIC_LIBRARY)
 
 
@@ -183,7 +194,6 @@ LOCAL_MODULE := asan_test
 LOCAL_MODULE_TAGS := tests
 LOCAL_C_INCLUDES := \
         bionic \
-        external/stlport/stlport \
         external/gtest/include \
         external/compiler-rt/lib \
 	external/compiler-rt/lib/asan/tests \
@@ -191,10 +201,12 @@ LOCAL_C_INCLUDES := \
 LOCAL_CFLAGS += $(asan_test_cflags)
 LOCAL_SRC_FILES := $(asan_test_files)
 LOCAL_CPP_EXTENSION := .cc
-LOCAL_STATIC_LIBRARIES := libgtest libasan_noinst_test
-LOCAL_SHARED_LIBRARIES := libc libstlport
+LOCAL_STATIC_LIBRARIES := libgtest_libc++ libasan_noinst_test
+LOCAL_SHARED_LIBRARIES := libc
 LOCAL_ADDRESS_SANITIZER := true
+LOCAL_CLANG := true
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
+include external/libcxx/libcxx.mk
 
 include $(BUILD_EXECUTABLE)
 
