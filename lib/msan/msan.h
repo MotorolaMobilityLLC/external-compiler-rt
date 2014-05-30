@@ -53,7 +53,7 @@ void InstallTrapHandler();
 void InstallAtExitHandler();
 void ReplaceOperatorsNewAndDelete();
 
-const char *GetOriginDescrIfStack(u32 id, uptr *pc);
+const char *GetStackOriginDescr(u32 id, uptr *pc);
 
 void EnterSymbolizer();
 void ExitSymbolizer();
@@ -76,11 +76,25 @@ void GetStackTrace(StackTrace *stack, uptr max_s, uptr pc, uptr bp,
 
 void ReportUMR(StackTrace *stack, u32 origin);
 void ReportExpectedUMRNotFound(StackTrace *stack);
+void ReportStats();
 void ReportAtExitStatistics();
+void DescribeMemoryRange(const void *x, uptr size);
+void ReportUMRInsideAddressRange(const char *what, const void *start, uptr size,
+                                 uptr offset);
 
 // Unpoison first n function arguments.
 void UnpoisonParam(uptr n);
 void UnpoisonThreadLocalState();
+
+u32 GetOriginIfPoisoned(uptr a, uptr size);
+void SetOriginIfPoisoned(uptr addr, uptr src_shadow, uptr size, u32 src_origin);
+void CopyOrigin(void *dst, const void *src, uptr size, StackTrace *stack);
+void MovePoison(void *dst, const void *src, uptr size, StackTrace *stack);
+void CopyPoison(void *dst, const void *src, uptr size, StackTrace *stack);
+
+// Returns a "chained" origin id, pointing to the given stack trace followed by
+// the previous origin id.
+u32 ChainOrigin(u32 id, StackTrace *stack);
 
 #define GET_MALLOC_STACK_TRACE                                     \
   StackTrace stack;                                                \
@@ -89,6 +103,23 @@ void UnpoisonThreadLocalState();
     GetStackTrace(&stack, common_flags()->malloc_context_size,     \
         StackTrace::GetCurrentPc(), GET_CURRENT_FRAME(),           \
         common_flags()->fast_unwind_on_malloc)
+
+#define GET_STORE_STACK_TRACE_PC_BP(pc, bp)                            \
+  StackTrace stack;                                                    \
+  stack.size = 0;                                                      \
+  if (__msan_get_track_origins() > 1 && msan_inited)                   \
+    GetStackTrace(&stack, common_flags()->malloc_context_size, pc, bp, \
+                  common_flags()->fast_unwind_on_malloc)
+
+#define GET_FATAL_STACK_TRACE_PC_BP(pc, bp)       \
+  StackTrace stack;                               \
+  stack.size = 0;                                 \
+  if (msan_inited)                                \
+    GetStackTrace(&stack, kStackTraceMax, pc, bp, \
+                  common_flags()->fast_unwind_on_fatal)
+
+#define GET_STORE_STACK_TRACE \
+  GET_STORE_STACK_TRACE_PC_BP(StackTrace::GetCurrentPc(), GET_CURRENT_FRAME())
 
 class ScopedThreadLocalStateBackup {
  public:
@@ -99,6 +130,14 @@ class ScopedThreadLocalStateBackup {
  private:
   u64 va_arg_overflow_size_tls;
 };
+
+extern void (*death_callback)(void);
+
+void MsanTSDInit(void (*destructor)(void *tsd));
+void *MsanTSDGet();
+void MsanTSDSet(void *tsd);
+void MsanTSDDtor(void *tsd);
+
 }  // namespace __msan
 
 #define MSAN_MALLOC_HOOK(ptr, size) \
