@@ -28,7 +28,9 @@
 
 #include "sanitizer_common/sanitizer_allocator.h"
 #include "sanitizer_common/sanitizer_allocator_internal.h"
+#include "sanitizer_common/sanitizer_asm.h"
 #include "sanitizer_common/sanitizer_common.h"
+#include "sanitizer_common/sanitizer_deadlock_detector_interface.h"
 #include "sanitizer_common/sanitizer_libignore.h"
 #include "sanitizer_common/sanitizer_suppressions.h"
 #include "sanitizer_common/sanitizer_thread_registry.h"
@@ -41,6 +43,7 @@
 #include "tsan_report.h"
 #include "tsan_platform.h"
 #include "tsan_mutexset.h"
+#include "tsan_ignoreset.h"
 
 #if SANITIZER_WORDSIZE != 64
 # error "ThreadSanitizer is supported only on 64-bit platforms"
@@ -413,6 +416,11 @@ struct ThreadState {
   // for better performance.
   int ignore_reads_and_writes;
   int ignore_sync;
+  // Go does not support ignores.
+#ifndef TSAN_GO
+  IgnoreSet mop_ignore_set;
+  IgnoreSet sync_ignore_set;
+#endif
   // C/C++ uses fixed size shadow stack embed into Trace.
   // Go uses malloc-allocated shadow stack with dynamic size.
   uptr *shadow_stack;
@@ -426,11 +434,11 @@ struct ThreadState {
   AllocatorCache alloc_cache;
   InternalAllocatorCache internal_alloc_cache;
   Vector<JmpBuf> jmp_bufs;
+  int ignore_interceptors;
 #endif
   u64 stat[StatCnt];
   const int tid;
   const int unique_id;
-  int in_rtl;
   bool in_symbolizer;
   bool in_ignored_lib;
   bool is_alive;
@@ -440,8 +448,11 @@ struct ThreadState {
   const uptr stk_size;
   const uptr tls_addr;
   const uptr tls_size;
+  ThreadContext *tctx;
 
-  DeadlockDetector deadlock_detector;
+  InternalDeadlockDetector internal_deadlock_detector;
+  DDPhysicalThread *dd_pt;
+  DDLogicalThread *dd_lt;
 
   bool in_signal_handler;
   SignalContext *signal_ctx;
@@ -456,13 +467,13 @@ struct ThreadState {
   int nomalloc;
 
   explicit ThreadState(Context *ctx, int tid, int unique_id, u64 epoch,
+                       unsigned reuse_count,
                        uptr stk_addr, uptr stk_size,
                        uptr tls_addr, uptr tls_size);
 };
 
-Context *CTX();
-
 #ifndef TSAN_GO
+__attribute__((tls_model("initial-exec")))
 extern THREADLOCAL char cur_thread_placeholder[];
 INLINE ThreadState *cur_thread() {
   return reinterpret_cast<ThreadState *>(&cur_thread_placeholder);
@@ -474,11 +485,7 @@ class ThreadContext : public ThreadContextBase {
   explicit ThreadContext(int tid);
   ~ThreadContext();
   ThreadState *thr;
-#ifdef TSAN_GO
-  StackTrace creation_stack;
-#else
   u32 creation_stack_id;
-#endif
   SyncClock sync;
   // Epoch at which the thread had started.
   // If we see an event from the thread stamped by an older epoch,
@@ -521,6 +528,7 @@ struct Context {
   Context();
 
   bool initialized;
+  bool after_multithreaded_fork;
 
   SyncTab synctab;
 
@@ -529,12 +537,16 @@ struct Context {
   int nmissed_expected;
   atomic_uint64_t last_symbolize_time_ns;
 
+  void *background_thread;
+  atomic_uint32_t stop_background_thread;
+
   ThreadRegistry *thread_registry;
 
   Vector<RacyStacks> racy_stacks;
   Vector<RacyAddress> racy_addresses;
   // Number of fired suppressions may be large enough.
   InternalMmapVector<FiredSuppression> fired_suppressions;
+  DDetector *dd;
 
   Flags flags;
 
@@ -543,14 +555,20 @@ struct Context {
   u64 int_alloc_siz[MBlockTypeCount];
 };
 
-class ScopedInRtl {
- public:
-  ScopedInRtl();
-  ~ScopedInRtl();
- private:
-  ThreadState*thr_;
-  int in_rtl_;
-  int errno_;
+extern Context *ctx;  // The one and the only global runtime context.
+
+struct ScopedIgnoreInterceptors {
+  ScopedIgnoreInterceptors() {
+#ifndef TSAN_GO
+    cur_thread()->ignore_interceptors++;
+#endif
+  }
+
+  ~ScopedIgnoreInterceptors() {
+#ifndef TSAN_GO
+    cur_thread()->ignore_interceptors--;
+#endif
+  }
 };
 
 class ScopedReport {
@@ -562,7 +580,10 @@ class ScopedReport {
   void AddMemoryAccess(uptr addr, Shadow s, const StackTrace *stack,
                        const MutexSet *mset);
   void AddThread(const ThreadContext *tctx);
+  void AddThread(int unique_tid);
+  void AddUniqueTid(int unique_tid);
   void AddMutex(const SyncVar *s);
+  u64 AddMutex(u64 id);
   void AddLocation(uptr addr, uptr size);
   void AddSleep(u32 stack_id);
   void SetCount(int count);
@@ -570,10 +591,12 @@ class ScopedReport {
   const ReportDesc *GetReport() const;
 
  private:
-  Context *ctx_;
   ReportDesc *rep_;
+  // Symbolizer makes lots of intercepted calls. If we try to process them,
+  // at best it will cause deadlocks on internal mutexes.
+  ScopedIgnoreInterceptors ignore_interceptors_;
 
-  void AddMutex(u64 id);
+  void AddDeadMutex(u64 id);
 
   ScopedReport(const ScopedReport&);
   void operator = (const ScopedReport&);
@@ -600,10 +623,14 @@ void InitializeInterceptors();
 void InitializeLibIgnore();
 void InitializeDynamicAnnotations();
 
+void ForkBefore(ThreadState *thr, uptr pc);
+void ForkParentAfter(ThreadState *thr, uptr pc);
+void ForkChildAfter(ThreadState *thr, uptr pc);
+
 void ReportRace(ThreadState *thr);
 bool OutputReport(Context *ctx,
                   const ScopedReport &srep,
-                  const ReportStack *suppress_stack1 = 0,
+                  const ReportStack *suppress_stack1,
                   const ReportStack *suppress_stack2 = 0,
                   const ReportLocation *suppress_loc = 0);
 bool IsFiredSuppression(Context *ctx,
@@ -627,6 +654,7 @@ ReportStack *SkipTsanInternalFrames(ReportStack *ent);
 #endif
 
 u32 CurrentStackId(ThreadState *thr, uptr pc);
+ReportStack *SymbolizeStackId(u32 stack_id);
 void PrintCurrentStack(ThreadState *thr, uptr pc);
 void PrintCurrentStackSlow();  // uses libunwind
 
@@ -678,10 +706,10 @@ void MemoryResetRange(ThreadState *thr, uptr pc, uptr addr, uptr size);
 void MemoryRangeFreed(ThreadState *thr, uptr pc, uptr addr, uptr size);
 void MemoryRangeImitateWrite(ThreadState *thr, uptr pc, uptr addr, uptr size);
 
-void ThreadIgnoreBegin(ThreadState *thr);
-void ThreadIgnoreEnd(ThreadState *thr);
-void ThreadIgnoreSyncBegin(ThreadState *thr);
-void ThreadIgnoreSyncEnd(ThreadState *thr);
+void ThreadIgnoreBegin(ThreadState *thr, uptr pc);
+void ThreadIgnoreEnd(ThreadState *thr, uptr pc);
+void ThreadIgnoreSyncBegin(ThreadState *thr, uptr pc);
+void ThreadIgnoreSyncEnd(ThreadState *thr, uptr pc);
 
 void FuncEntry(ThreadState *thr, uptr pc);
 void FuncExit(ThreadState *thr);
@@ -700,9 +728,10 @@ void ProcessPendingSignals(ThreadState *thr);
 void MutexCreate(ThreadState *thr, uptr pc, uptr addr,
                  bool rw, bool recursive, bool linker_init);
 void MutexDestroy(ThreadState *thr, uptr pc, uptr addr);
-void MutexLock(ThreadState *thr, uptr pc, uptr addr, int rec = 1);
+void MutexLock(ThreadState *thr, uptr pc, uptr addr, int rec = 1,
+               bool try_lock = false);
 int  MutexUnlock(ThreadState *thr, uptr pc, uptr addr, bool all = false);
-void MutexReadLock(ThreadState *thr, uptr pc, uptr addr);
+void MutexReadLock(ThreadState *thr, uptr pc, uptr addr, bool try_lock = false);
 void MutexReadUnlock(ThreadState *thr, uptr pc, uptr addr);
 void MutexReadOrWriteUnlock(ThreadState *thr, uptr pc, uptr addr);
 void MutexRepair(ThreadState *thr, uptr pc, uptr addr);  // call on EOWNERDEAD
@@ -728,11 +757,11 @@ void AcquireReleaseImpl(ThreadState *thr, uptr pc, SyncClock *c);
 // so we create a reserve stack frame for it (1024b must be enough).
 #define HACKY_CALL(f) \
   __asm__ __volatile__("sub $1024, %%rsp;" \
-                       ".cfi_adjust_cfa_offset 1024;" \
+                       CFI_INL_ADJUST_CFA_OFFSET(1024) \
                        ".hidden " #f "_thunk;" \
                        "call " #f "_thunk;" \
                        "add $1024, %%rsp;" \
-                       ".cfi_adjust_cfa_offset -1024;" \
+                       CFI_INL_ADJUST_CFA_OFFSET(-1024) \
                        ::: "memory", "cc");
 #else
 #define HACKY_CALL(f) f()
@@ -747,6 +776,8 @@ Trace *ThreadTrace(int tid);
 extern "C" void __tsan_trace_switch();
 void ALWAYS_INLINE TraceAddEvent(ThreadState *thr, FastState fs,
                                         EventType typ, u64 addr) {
+  if (!kCollectHistory)
+    return;
   DCHECK_GE((int)typ, 0);
   DCHECK_LE((int)typ, 7);
   DCHECK_EQ(GetLsb(addr, 61), addr);
