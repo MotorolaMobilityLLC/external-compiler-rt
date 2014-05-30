@@ -15,7 +15,8 @@
 #ifndef INTERCEPTION_H
 #define INTERCEPTION_H
 
-#if !defined(__linux__) && !defined(__APPLE__) && !defined(_WIN32)
+#if !defined(__linux__) && !defined(__FreeBSD__) && \
+  !defined(__APPLE__) && !defined(_WIN32)
 # error "Interception doesn't work on this operating system."
 #endif
 
@@ -126,9 +127,9 @@ const interpose_substitution substitution_##func_name[] \
 #  define WRAPPER_NAME(x) #x
 #  define INTERCEPTOR_ATTRIBUTE
 # else  // Static CRT
-#  define WRAP(x) wrap_##x
-#  define WRAPPER_NAME(x) "wrap_"#x
-#  define INTERCEPTOR_ATTRIBUTE
+#  define WRAP(x) __asan_wrap_##x
+#  define WRAPPER_NAME(x) "__asan_wrap_"#x
+#  define INTERCEPTOR_ATTRIBUTE __declspec(dllexport)
 # endif
 # define DECLARE_WRAPPER(ret_type, func, ...) \
     extern "C" ret_type func(__VA_ARGS__);
@@ -235,11 +236,11 @@ typedef unsigned long uptr;  // NOLINT
 
 #define INCLUDED_FROM_INTERCEPTION_LIB
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
 # include "interception_linux.h"
-# define INTERCEPT_FUNCTION(func) INTERCEPT_FUNCTION_LINUX(func)
+# define INTERCEPT_FUNCTION(func) INTERCEPT_FUNCTION_LINUX_OR_FREEBSD(func)
 # define INTERCEPT_FUNCTION_VER(func, symver) \
-    INTERCEPT_FUNCTION_VER_LINUX(func, symver)
+    INTERCEPT_FUNCTION_VER_LINUX_OR_FREEBSD(func, symver)
 #elif defined(__APPLE__)
 # include "interception_mac.h"
 # define INTERCEPT_FUNCTION(func) INTERCEPT_FUNCTION_MAC(func)
