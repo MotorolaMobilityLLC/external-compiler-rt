@@ -3,8 +3,12 @@ include(CompilerRTCompile)
 set(SANITIZER_UNITTESTS
   sanitizer_allocator_test.cc
   sanitizer_atomic_test.cc
+  sanitizer_bitvector_test.cc
+  sanitizer_bvgraph_test.cc
   sanitizer_common_test.cc
+  sanitizer_deadlock_detector_test.cc
   sanitizer_flags_test.cc
+  sanitizer_format_interceptor_test.cc
   sanitizer_ioctl_test.cc
   sanitizer_libc_test.cc
   sanitizer_linux_test.cc
@@ -13,7 +17,7 @@ set(SANITIZER_UNITTESTS
   sanitizer_nolibc_test.cc
   sanitizer_posix_test.cc
   sanitizer_printf_test.cc
-  sanitizer_scanf_interceptor_test.cc
+  sanitizer_procmaps_test.cc
   sanitizer_stackdepot_test.cc
   sanitizer_stacktrace_test.cc
   sanitizer_stoptheworld_test.cc
@@ -22,22 +26,55 @@ set(SANITIZER_UNITTESTS
   sanitizer_thread_registry_test.cc)
 
 set(SANITIZER_TEST_HEADERS
+  sanitizer_pthread_wrappers.h
+  sanitizer_test_config.h
   sanitizer_test_utils.h)
 foreach(header ${SANITIZER_HEADERS})
   list(APPEND SANITIZER_TEST_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/../${header})
 endforeach()
 
 set(SANITIZER_TEST_CFLAGS_COMMON
-  ${COMPILER_RT_GTEST_INCLUDE_CFLAGS}
+  ${COMPILER_RT_GTEST_CFLAGS}
   -I${COMPILER_RT_SOURCE_DIR}/include
   -I${COMPILER_RT_SOURCE_DIR}/lib
   -I${COMPILER_RT_SOURCE_DIR}/lib/sanitizer_common
   -DGTEST_HAS_RTTI=0
-  -O2 -g -fno-rtti
-  -Wall -Werror -Werror=sign-compare)
+  -O2
+  -Werror=sign-compare
+  -Wno-non-virtual-dtor)
 
-set(SANITIZER_TEST_LINK_FLAGS_COMMON
-  -lstdc++ -ldl)
+append_if(COMPILER_RT_HAS_G_FLAG -g SANITIZER_TEST_CFLAGS_COMMON)
+append_if(COMPILER_RT_HAS_Zi_FLAG -Zi SANITIZER_TEST_CFLAGS_COMMON)
+
+append_if(COMPILER_RT_HAS_FNO_RTTI_FLAG -fno-rtti SANITIZER_TEST_CFLAGS_COMMON)
+append_if(COMPILER_RT_HAS_GR_FLAG -GR- SANITIZER_TEST_CFLAGS_COMMON)
+
+if(MSVC)
+  # System headers and gtest use a lot of deprecated stuff.
+  list(APPEND SANITIZER_TEST_CFLAGS_COMMON
+       -Wno-deprecated-declarations)
+
+  # clang-cl doesn't support exceptions yet.
+  list(APPEND SANITIZER_TEST_CFLAGS_COMMON
+       /fallback
+       -D_HAS_EXCEPTIONS=0)
+
+  # We should teach clang-cl to understand more pragmas.
+  list(APPEND SANITIZER_TEST_CFLAGS_COMMON
+       -Wno-unknown-pragmas
+       -Wno-undefined-inline)
+endif()
+
+if(NOT MSVC)
+  list(APPEND SANITIZER_TEST_LINK_FLAGS_COMMON --driver-mode=g++)
+endif()
+
+append_if(COMPILER_RT_HAS_LIBDL -ldl SANITIZER_TEST_LINK_FLAGS_COMMON)
+append_if(COMPILER_RT_HAS_LIBPTHREAD -lpthread SANITIZER_TEST_LINK_FLAGS_COMMON)
+# x86_64 FreeBSD 9.2 additionally requires libc++ to build the tests.
+if(CMAKE_SYSTEM MATCHES "FreeBSD-9.2-RELEASE")
+  list(APPEND SANITIZER_TEST_LINK_FLAGS_COMMON "-lc++")
+endif()
 
 include_directories(..)
 include_directories(../..)
@@ -57,7 +94,11 @@ function(get_sanitizer_common_lib_for_arch arch lib lib_name)
     set(tgt_name "RTSanitizerCommon.test.${arch}")
   endif()
   set(${lib} "${tgt_name}" PARENT_SCOPE)
-  set(${lib_name} "lib${tgt_name}.a" PARENT_SCOPE)
+  if(NOT MSVC)
+    set(${lib_name} "lib${tgt_name}.a" PARENT_SCOPE)
+  else()
+    set(${lib_name} "${tgt_name}.lib" PARENT_SCOPE)
+  endif()
 endfunction()
 
 # Sanitizer_common unit tests testsuite.
@@ -70,14 +111,17 @@ macro(add_sanitizer_tests_for_arch arch)
   get_target_flags_for_arch(${arch} TARGET_FLAGS)
   set(SANITIZER_TEST_SOURCES ${SANITIZER_UNITTESTS}
                              ${COMPILER_RT_GTEST_SOURCE})
+  set(SANITIZER_TEST_COMPILE_DEPS ${SANITIZER_TEST_HEADERS})
+  if(NOT COMPILER_RT_STANDALONE_BUILD)
+    list(APPEND SANITIZER_TEST_COMPILE_DEPS gtest)
+  endif()
   set(SANITIZER_TEST_OBJECTS)
   foreach(source ${SANITIZER_TEST_SOURCES})
     get_filename_component(basename ${source} NAME)
     set(output_obj "${basename}.${arch}.o")
     clang_compile(${output_obj} ${source}
                   CFLAGS ${SANITIZER_TEST_CFLAGS_COMMON} ${TARGET_FLAGS}
-                  DEPS gtest ${SANITIZER_RUNTIME_LIBRARIES}
-                       ${SANITIZER_TEST_HEADERS})
+                  DEPS ${SANITIZER_TEST_COMPILE_DEPS})
     list(APPEND SANITIZER_TEST_OBJECTS ${output_obj})
   endforeach()
   get_sanitizer_common_lib_for_arch(${arch} SANITIZER_COMMON_LIB
@@ -89,7 +133,7 @@ macro(add_sanitizer_tests_for_arch arch)
                                ${SANITIZER_COMMON_LIB_NAME}
                        DEPS ${SANITIZER_TEST_OBJECTS} ${SANITIZER_COMMON_LIB}
                        LINK_FLAGS ${SANITIZER_TEST_LINK_FLAGS_COMMON}
-                                  -lpthread ${TARGET_FLAGS})
+                                  ${TARGET_FLAGS})
 
   if("${CMAKE_SYSTEM_NAME}" STREQUAL "Linux" AND "${arch}" STREQUAL "x86_64")
     # Test that the libc-independent part of sanitizer_common is indeed
@@ -98,7 +142,7 @@ macro(add_sanitizer_tests_for_arch arch)
     clang_compile(sanitizer_nolibc_test_main.${arch}.o
                   sanitizer_nolibc_test_main.cc
                   CFLAGS ${SANITIZER_TEST_CFLAGS_COMMON} ${TARGET_FLAGS}
-                  DEPS ${SANITIZER_RUNTIME_LIBRARIES} ${SANITIZER_TEST_HEADERS})
+                  DEPS ${SANITIZER_TEST_COMPILE_DEPS})
     add_compiler_rt_test(SanitizerUnitTests "Sanitizer-${arch}-Test-Nolibc"
                          OBJECTS sanitizer_nolibc_test_main.${arch}.o
                                  -Wl,-whole-archive
@@ -136,18 +180,6 @@ if(COMPILER_RT_CAN_EXECUTE_TESTS)
   if(CAN_TARGET_i386)
     add_sanitizer_tests_for_arch(i386)
   endif()
-
-  # Run unittests as a part of lit testsuite.
-  configure_lit_site_cfg(
-    ${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.in
-    ${CMAKE_CURRENT_BINARY_DIR}/lit.site.cfg
-    )
-
-  add_lit_testsuite(check-sanitizer "Running sanitizer library unittests"
-    ${CMAKE_CURRENT_BINARY_DIR}
-    DEPENDS SanitizerUnitTests
-    )
-  set_target_properties(check-sanitizer PROPERTIES FOLDER "Sanitizer unittests")
 endif()
 
 if(ANDROID)
@@ -164,6 +196,7 @@ if(ANDROID)
   set_target_properties(SanitizerTest PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
   set_target_link_flags(SanitizerTest ${SANITIZER_TEST_LINK_FLAGS_COMMON})
+  target_link_libraries(SanitizerTest log)
   # Add unit test to test suite.
   add_dependencies(SanitizerUnitTests SanitizerTest)
 endif()
