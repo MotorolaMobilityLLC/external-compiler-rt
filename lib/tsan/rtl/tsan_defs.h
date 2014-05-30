@@ -41,6 +41,7 @@ const int kTidBits = 13;
 const unsigned kMaxTid = 1 << kTidBits;
 const unsigned kMaxTidInClock = kMaxTid * 2;  // This includes msb 'freed' bit.
 const int kClkBits = 42;
+const unsigned kMaxTidReuse = (1 << (64 - kClkBits)) - 1;
 const uptr kShadowStackSize = 64 * 1024;
 const uptr kTraceStackSize = 256;
 
@@ -64,6 +65,12 @@ const uptr kShadowSize = 8;
 
 // Shadow memory is kShadowMultiplier times larger than user memory.
 const uptr kShadowMultiplier = kShadowSize * kShadowCnt / kShadowCell;
+
+#if defined(TSAN_NO_HISTORY) && TSAN_NO_HISTORY
+const bool kCollectHistory = false;
+#else
+const bool kCollectHistory = true;
+#endif
 
 #if defined(TSAN_COLLECT_STATS) && TSAN_COLLECT_STATS
 const bool kCollectStats = true;
@@ -154,6 +161,7 @@ struct MD5Hash {
 MD5Hash md5_hash(const void *data, uptr size);
 
 struct ThreadState;
+class ThreadContext;
 struct Context;
 struct ReportStack;
 class ReportDesc;
