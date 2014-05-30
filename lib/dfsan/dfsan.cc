@@ -230,12 +230,22 @@ dfsan_has_label_with_desc(dfsan_label label, const char *desc) {
   }
 }
 
+extern "C" SANITIZER_INTERFACE_ATTRIBUTE uptr
+dfsan_get_label_count(void) {
+  dfsan_label max_label_allocated =
+      atomic_load(&__dfsan_last_label, memory_order_relaxed);
+
+  return static_cast<uptr>(max_label_allocated);
+}
+
 static void InitializeFlags(Flags &f, const char *env) {
   f.warn_unimplemented = true;
   f.warn_nonzero_labels = false;
+  f.strict_data_dependencies = true;
 
-  ParseFlag(env, &f.warn_unimplemented, "warn_unimplemented");
-  ParseFlag(env, &f.warn_nonzero_labels, "warn_nonzero_labels");
+  ParseFlag(env, &f.warn_unimplemented, "warn_unimplemented", "");
+  ParseFlag(env, &f.warn_nonzero_labels, "warn_nonzero_labels", "");
+  ParseFlag(env, &f.strict_data_dependencies, "strict_data_dependencies", "");
 }
 
 #ifdef DFSAN_NOLIBC
