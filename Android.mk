@@ -340,6 +340,7 @@ LOCAL_ASFLAGS := -integrated-as
 LOCAL_CLANG := true
 LOCAL_SRC_FILES := $(call get-libcompiler-rt-source-files,x86_64)
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
+LOCAL_MULTILIB := both
 
 include $(BUILD_HOST_STATIC_LIBRARY)
 
@@ -382,6 +383,7 @@ LOCAL_WHOLE_STATIC_LIBRARIES := libcompiler_rt
 LOCAL_CPPFLAGS := -nostdinc++
 LOCAL_LDFLAGS := -nodefaultlibs
 LOCAL_LDLIBS := -lc -lm
+LOCAL_MULTILIB := both
 
 include $(BUILD_HOST_SHARED_LIBRARY)
 
