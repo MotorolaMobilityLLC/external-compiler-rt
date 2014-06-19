@@ -30,6 +30,7 @@ libcompiler_rt_common_SRC_FILES := \
   lib/builtins/absvti2.c \
   lib/builtins/adddf3.c \
   lib/builtins/addsf3.c \
+  lib/builtins/addtf3.c \
   lib/builtins/addvdi3.c \
   lib/builtins/addvsi3.c \
   lib/builtins/addvti3.c \
@@ -111,6 +112,7 @@ libcompiler_rt_common_SRC_FILES := \
   lib/builtins/muloti4.c \
   lib/builtins/mulsc3.c \
   lib/builtins/mulsf3.c \
+  lib/builtins/multf3.c \
   lib/builtins/multi3.c \
   lib/builtins/mulvdi3.c \
   lib/builtins/mulvsi3.c \
@@ -135,6 +137,7 @@ libcompiler_rt_common_SRC_FILES := \
   lib/builtins/powixf2.c \
   lib/builtins/subdf3.c \
   lib/builtins/subsf3.c \
+  lib/builtins/subtf3.c \
   lib/builtins/subvdi3.c \
   lib/builtins/subvsi3.c \
   lib/builtins/subvti3.c \
