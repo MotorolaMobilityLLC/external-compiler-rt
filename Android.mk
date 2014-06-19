@@ -45,6 +45,7 @@ libcompiler_rt_common_SRC_FILES := \
   lib/builtins/cmpti2.c \
   lib/builtins/comparedf2.c \
   lib/builtins/comparesf2.c \
+  lib/builtins/comparetf2.c \
   lib/builtins/ctzdi2.c \
   lib/builtins/ctzsi2.c \
   lib/builtins/ctzti2.c \
