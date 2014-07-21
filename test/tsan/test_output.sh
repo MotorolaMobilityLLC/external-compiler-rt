@@ -5,7 +5,6 @@ set -e # fail on any error
 
 HERE=$(dirname $0)
 TSAN_DIR=$(dirname $0)/../../lib/tsan
-BLACKLIST=$HERE/Helpers/blacklist.txt
 
 # Assume clang and clang++ are in path.
 : ${CC:=clang}
@@ -13,8 +12,8 @@ BLACKLIST=$HERE/Helpers/blacklist.txt
 : ${FILECHECK:=FileCheck}
 
 # TODO: add testing for all of -O0...-O3
-CFLAGS="-fsanitize=thread -fsanitize-blacklist=$BLACKLIST -fPIE -O1 -g -Wall"
-LDFLAGS="-pie -lpthread -ldl -lrt -lm -Wl,--whole-archive $TSAN_DIR/rtl/libtsan.a -Wl,--no-whole-archive"
+CFLAGS="-fsanitize=thread -fPIE -O1 -g -Wall"
+LDFLAGS="-pie -pthread -ldl -lrt -lm -Wl,--whole-archive $TSAN_DIR/rtl/libtsan.a -Wl,--no-whole-archive"
 
 test_file() {
   SRC=$1
@@ -38,6 +37,10 @@ if [ "$1" == "" ]; then
       continue
     fi
     if [[ $c == */load_shared_lib.cc ]]; then
+      echo TEST $c is not supported
+      continue
+    fi
+    if [[ $c == */*blacklist*.cc ]]; then
       echo TEST $c is not supported
       continue
     fi

@@ -100,7 +100,7 @@ asan_test_files := \
 #tests/asan_test_main.cc \
 
 asan_test_cflags := \
-	-mllvm -asan-blacklist=external/compiler-rt/lib/asan/tests/asan_test.ignore \
+	-fsanitize-blacklist=external/compiler-rt/lib/asan/tests/asan_test.ignore \
 	-DASAN_LOW_MEMORY=1 \
 	-DASAN_UAR=0 \
 	-DASAN_NEEDS_SEGV=$(ASAN_NEEDS_SEGV) \
