@@ -38,6 +38,17 @@ static void InitializeSanitizerCommon() {
   initialized = true;
 }
 
+namespace {
+class Decorator : public SanitizerCommonDecorator {
+ public:
+  Decorator() : SanitizerCommonDecorator() {}
+  const char *Highlight() const { return Green(); }
+  const char *EndHighlight() const { return Default(); }
+  const char *Note() const { return Black(); }
+  const char *EndNote() const { return Default(); }
+};
+}
+
 Location __ubsan::getCallerLocation(uptr CallerLoc) {
   if (!CallerLoc)
     return Location();
@@ -49,7 +60,6 @@ Location __ubsan::getCallerLocation(uptr CallerLoc) {
 Location __ubsan::getFunctionLocation(uptr Loc, const char **FName) {
   if (!Loc)
     return Location();
-  // FIXME: We may need to run initialization earlier.
   InitializeSanitizerCommon();
 
   AddressInfo Info;
@@ -184,8 +194,7 @@ static Range *upperBound(MemoryLocation Loc, Range *Ranges,
 }
 
 /// Render a snippet of the address space near a location.
-static void renderMemorySnippet(const __sanitizer::AnsiColorDecorator &Decor,
-                                MemoryLocation Loc,
+static void renderMemorySnippet(const Decorator &Decor, MemoryLocation Loc,
                                 Range *Ranges, unsigned NumRanges,
                                 const Diag::Arg *Args) {
   const unsigned BytesToShow = 32;
@@ -212,7 +221,7 @@ static void renderMemorySnippet(const __sanitizer::AnsiColorDecorator &Decor,
   Printf("\n");
 
   // Emit highlights.
-  Printf(Decor.Green());
+  Printf(Decor.Highlight());
   Range *InRange = upperBound(Min, Ranges, NumRanges);
   for (uptr P = Min; P != Max; ++P) {
     char Pad = ' ', Byte = ' ';
@@ -227,7 +236,7 @@ static void renderMemorySnippet(const __sanitizer::AnsiColorDecorator &Decor,
     char Buffer[] = { Pad, Pad, P == Loc ? '^' : Byte, Byte, 0 };
     Printf((P % 8 == 0) ? Buffer : &Buffer[1]);
   }
-  Printf("%s\n", Decor.Default());
+  Printf("%s\n", Decor.EndHighlight());
 
   // Go over the line again, and print names for the ranges.
   InRange = 0;
@@ -265,7 +274,8 @@ static void renderMemorySnippet(const __sanitizer::AnsiColorDecorator &Decor,
 }
 
 Diag::~Diag() {
-  __sanitizer::AnsiColorDecorator Decor(PrintsToTty());
+  InitializeSanitizerCommon();
+  Decorator Decor;
   SpinMutexLock l(&CommonSanitizerReportMutex);
   Printf(Decor.Bold());
 
@@ -274,11 +284,11 @@ Diag::~Diag() {
   switch (Level) {
   case DL_Error:
     Printf("%s runtime error: %s%s",
-           Decor.Red(), Decor.Default(), Decor.Bold());
+           Decor.Warning(), Decor.EndWarning(), Decor.Bold());
     break;
 
   case DL_Note:
-    Printf("%s note: %s", Decor.Black(), Decor.Default());
+    Printf("%s note: %s", Decor.Note(), Decor.EndNote());
     break;
   }
 
