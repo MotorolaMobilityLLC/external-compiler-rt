@@ -43,8 +43,8 @@ void NORETURN ReportAllocTypeMismatch(uptr addr, StackTrace *free_stack,
                                       AllocType dealloc_type);
 void NORETURN ReportMallocUsableSizeNotOwned(uptr addr,
                                              StackTrace *stack);
-void NORETURN ReportAsanGetAllocatedSizeNotOwned(uptr addr,
-                                                 StackTrace *stack);
+void NORETURN
+ReportSanitizerGetAllocatedSizeNotOwned(uptr addr, StackTrace *stack);
 void NORETURN ReportStringFunctionMemoryRangesOverlap(
     const char *function, const char *offset1, uptr length1,
     const char *offset2, uptr length2, StackTrace *stack);
@@ -55,7 +55,8 @@ ReportBadParamsToAnnotateContiguousContainer(uptr beg, uptr end, uptr old_mid,
                                              uptr new_mid, StackTrace *stack);
 
 void NORETURN
-ReportODRViolation(const __asan_global *g1, const __asan_global *g2);
+ReportODRViolation(const __asan_global *g1, u32 stack_id1,
+                   const __asan_global *g2, u32 stack_id2);
 
 // Mac-specific errors and warnings.
 void WarnMacFreeUnallocated(
