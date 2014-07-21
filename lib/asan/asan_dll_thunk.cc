@@ -20,6 +20,7 @@
 // Using #ifdef rather than relying on Makefiles etc.
 // simplifies the build procedure.
 #ifdef ASAN_DLL_THUNK
+#include "asan_init_version.h"
 #include "sanitizer_common/sanitizer_interception.h"
 
 // ---------- Function interception helper functions and macros ----------- {{{1
@@ -74,7 +75,10 @@ struct FunctionInterceptor<0> {
 // Special case of hooks -- ASan own interface functions.  Those are only called
 // after __asan_init, thus an empty implementation is sufficient.
 #define INTERFACE_FUNCTION(name)                                               \
-  extern "C" void name() { __debugbreak(); }                                   \
+  extern "C" void name() {                                                     \
+    volatile int prevent_icf = (__LINE__ << 8); (void)prevent_icf;             \
+    __debugbreak();                                                            \
+  }                                                                            \
   INTERCEPT_WHEN_POSSIBLE(#name, name)
 
 // INTERCEPT_HOOKS must be used after the last INTERCEPT_WHEN_POSSIBLE.
@@ -200,13 +204,13 @@ extern "C" {
 
   // Manually wrap __asan_init as we need to initialize
   // __asan_option_detect_stack_use_after_return afterwards.
-  void __asan_init_v3() {
+  void __asan_init() {
     typedef void (*fntype)();
     static fntype fn = 0;
-    // __asan_init_v3 is expected to be called by only one thread.
+    // __asan_init is expected to be called by only one thread.
     if (fn) return;
 
-    fn = (fntype)getRealProcAddressOrDie("__asan_init_v3");
+    fn = (fntype)getRealProcAddressOrDie(__asan_init_name);
     fn();
     __asan_option_detect_stack_use_after_return =
         (__asan_should_detect_stack_use_after_return() != 0);
@@ -273,6 +277,8 @@ INTERFACE_FUNCTION(__asan_stack_free_8)
 INTERFACE_FUNCTION(__asan_stack_free_9)
 INTERFACE_FUNCTION(__asan_stack_free_10)
 
+INTERFACE_FUNCTION(__sanitizer_cov_module_init)
+
 // TODO(timurrrr): Add more interface functions on the as-needed basis.
 
 // ----------------- Memory allocation functions ---------------------
@@ -320,9 +326,24 @@ INTERCEPT_LIBRARY_FUNCTION(strnlen);
 INTERCEPT_LIBRARY_FUNCTION(strtol);
 INTERCEPT_LIBRARY_FUNCTION(wcslen);
 
-// Must be at the end of the file due to the way INTERCEPT_HOOKS is defined.
+// Must be after all the interceptor declarations due to the way INTERCEPT_HOOKS
+// is defined.
 void InterceptHooks() {
   INTERCEPT_HOOKS();
 }
+
+// We want to call __asan_init before C/C++ initializers/constructors are
+// executed, otherwise functions like memset might be invoked.
+// For some strange reason, merely linking in asan_preinit.cc doesn't work
+// as the callback is never called...  Is link.exe doing something too smart?
+
+// In DLLs, the callbacks are expected to return 0,
+// otherwise CRT initialization fails.
+static int call_asan_init() {
+  __asan_init();
+  return 0;
+}
+#pragma section(".CRT$XIB", long, read)  // NOLINT
+__declspec(allocate(".CRT$XIB")) int (*__asan_preinit)() = call_asan_init;
 
 #endif // ASAN_DLL_THUNK
