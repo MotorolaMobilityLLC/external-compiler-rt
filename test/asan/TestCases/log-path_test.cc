@@ -1,3 +1,6 @@
+// FIXME: https://code.google.com/p/address-sanitizer/issues/detail?id=316
+// XFAIL: android
+//
 // RUN: %clangxx_asan  %s -o %t
 
 // Regular run.
@@ -23,6 +26,8 @@
 // RUN: env ASAN_OPTIONS=log_path=%t.log  %run %t ARG ARG ARG
 // RUN: not cat %t.log.*
 
+// FIXME: log_path is not supported on Windows yet.
+// XFAIL: win32
 
 #include <stdlib.h>
 #include <string.h>
