@@ -29,6 +29,11 @@ struct FlagDescription {
 
 IntrusiveList<FlagDescription> flag_descriptions;
 
+// If set, the tool will install its own SEGV signal handler by default.
+#ifndef SANITIZER_NEEDS_SEGV
+# define SANITIZER_NEEDS_SEGV 1
+#endif
+
 void SetCommonFlagsDefaults(CommonFlags *f) {
   f->symbolize = true;
   f->external_symbolizer_path = 0;
@@ -55,7 +60,8 @@ void SetCommonFlagsDefaults(CommonFlags *f) {
   f->legacy_pthread_cond = false;
   f->intercept_tls_get_addr = false;
   f->coverage = false;
-  f->coverage_direct = false;
+  f->coverage_direct = SANITIZER_ANDROID;
+  f->coverage_dir = ".";
   f->full_address_space = false;
 }
 
@@ -132,6 +138,9 @@ void ParseCommonFlagsFromString(CommonFlags *f, const char *str) {
             "If set, coverage information will be dumped directly to a memory "
             "mapped file. This way data is not lost even if the process is "
             "suddenly killed.");
+  ParseFlag(str, &f->coverage_dir, "coverage_dir",
+            "Target directory for coverage dumps. Defaults to the current "
+            "directory.");
   ParseFlag(str, &f->full_address_space, "full_address_space",
             "Sanitize complete address space; "
             "by default kernel area on 32-bit platforms will not be sanitized");
@@ -150,14 +159,17 @@ static bool GetFlagValue(const char *env, const char *name,
     pos = internal_strstr(env, name);
     if (pos == 0)
       return false;
-    if (pos != env && ((pos[-1] >= 'a' && pos[-1] <= 'z') || pos[-1] == '_')) {
+    const char *name_end = pos + internal_strlen(name);
+    if ((pos != env &&
+         ((pos[-1] >= 'a' && pos[-1] <= 'z') || pos[-1] == '_')) ||
+        *name_end != '=') {
       // Seems to be middle of another flag name or value.
       env = pos + 1;
       continue;
     }
+    pos = name_end;
     break;
   }
-  pos += internal_strlen(name);
   const char *end;
   if (pos[0] != '=') {
     end = pos;
