@@ -1,6 +1,10 @@
+// FIXME: https://code.google.com/p/address-sanitizer/issues/detail?id=316
+// XFAIL: android
+//
 // RUN: %clangxx_asan -DSHARED %s -shared -o %T/stack_trace_dlclose.so -fPIC
 // RUN: %clangxx_asan -DSO_DIR=\"%T\" %s -o %t
 // RUN: ASAN_OPTIONS=exitcode=0 %run %t 2>&1 | FileCheck %s
+// XFAIL: arm-linux-gnueabi
 
 #include <assert.h>
 #include <dlfcn.h>
