@@ -191,13 +191,14 @@ namespace __sanitizer {
   unsigned struct_tms_sz = sizeof(struct tms);
   unsigned struct_sigevent_sz = sizeof(struct sigevent);
   unsigned struct_sched_param_sz = sizeof(struct sched_param);
-  unsigned struct_statfs_sz = sizeof(struct statfs);
+
 
 #if SANITIZER_MAC && !SANITIZER_IOS
   unsigned struct_statfs64_sz = sizeof(struct statfs64);
 #endif // SANITIZER_MAC && !SANITIZER_IOS
 
 #if !SANITIZER_ANDROID
+  unsigned struct_statfs_sz = sizeof(struct statfs);
   unsigned struct_sockaddr_sz = sizeof(struct sockaddr);
   unsigned ucontext_t_sz = sizeof(ucontext_t);
 #endif // !SANITIZER_ANDROID
@@ -289,6 +290,7 @@ namespace __sanitizer {
   int ptrace_setfpregs = PTRACE_SETFPREGS;
   int ptrace_getfpxregs = PTRACE_GETFPXREGS;
   int ptrace_setfpxregs = PTRACE_SETFPXREGS;
+  int ptrace_geteventmsg = PTRACE_GETEVENTMSG;
 #if (defined(PTRACE_GETSIGINFO) && defined(PTRACE_SETSIGINFO)) ||              \
     (defined(PT_GETSIGINFO) && defined(PT_SETSIGINFO))
   int ptrace_getsiginfo = PTRACE_GETSIGINFO;
@@ -1057,6 +1059,10 @@ CHECK_SIZE_AND_OFFSET(shmid_ds, shm_nattch);
 #endif
 
 CHECK_TYPE_SIZE(clock_t);
+
+#if SANITIZER_LINUX
+CHECK_TYPE_SIZE(clockid_t);
+#endif
 
 #if !SANITIZER_ANDROID
 CHECK_TYPE_SIZE(ifaddrs);

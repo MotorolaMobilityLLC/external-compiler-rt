@@ -27,9 +27,9 @@ using namespace __sanitizer;
 
 namespace __msan {
 
-class Decorator: private __sanitizer::AnsiColorDecorator {
+class Decorator: public __sanitizer::SanitizerCommonDecorator {
  public:
-  Decorator() : __sanitizer::AnsiColorDecorator(PrintsToTtyCached()) { }
+  Decorator() : SanitizerCommonDecorator() { }
   const char *Warning()    { return Red(); }
   const char *Origin()     { return Magenta(); }
   const char *Name()   { return Green(); }
@@ -63,6 +63,10 @@ static void DescribeOrigin(u32 id) {
   Decorator d;
   while (true) {
     Origin o(id);
+    if (!o.isValid()) {
+      Printf("  %sinvalid origin id(%d)%s\n", d.Warning(), id, d.End());
+      break;
+    }
     u32 prev_id;
     u32 stack_id = ChainedOriginDepotGet(o.id(), &prev_id);
     Origin prev_o(prev_id);
@@ -86,7 +90,7 @@ static void DescribeOrigin(u32 id) {
       // FIXME: copied? modified? passed through? observed?
       Printf("  %sUninitialized value was stored to memory at%s\n", d.Origin(),
              d.End());
-      StackTrace::PrintStack(trace, size - 1);
+      StackTrace::PrintStack(trace, size);
       id = prev_id;
     }
   }
@@ -217,7 +221,11 @@ void DescribeMemoryRange(const void *x, uptr size) {
     } else {
       unsigned char v = *(unsigned char *)s;
       if (v) last_quad_poisoned = true;
-      Printf("%02x", v);
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+      Printf("%x%x", v & 0xf, v >> 4);
+#else
+      Printf("%x%x", v >> 4, v & 0xf);
+#endif
     }
     // Group end.
     if (pos % 4 == 3 && with_origins) {
