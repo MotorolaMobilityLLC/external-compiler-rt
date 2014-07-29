@@ -153,6 +153,7 @@ LOCAL_C_INCLUDES := \
         bionic
 LOCAL_SRC_FILES := asanwrapper.cc
 LOCAL_CPP_EXTENSION := .cc
+LOCAL_CPPFLAGS := -std=c++11
 LOCAL_SHARED_LIBRARIES += libc
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include external/libcxx/libcxx.mk
