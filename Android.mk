@@ -17,7 +17,6 @@
 
 LOCAL_PATH := $(call my-dir)
 
-ifeq (,$(TARGET_BUILD_APPS))
 
 # The following list contains platform-independent functionalities.
 #
@@ -392,5 +391,3 @@ LOCAL_MULTILIB := both
 include $(BUILD_HOST_SHARED_LIBRARY)
 
 endif
-
-endif # TARGET_BUILD_APPS only
