@@ -59,7 +59,6 @@ libcompiler_rt_common_SRC_FILES := \
   lib/builtins/divsi3.c \
   lib/builtins/divti3.c \
   lib/builtins/divxc3.c \
-  lib/builtins/enable_execute_stack.c \
   lib/builtins/eprintf.c \
   lib/builtins/extendsfdf2.c \
   lib/builtins/ffsdi2.c \
@@ -153,6 +152,12 @@ libcompiler_rt_common_SRC_FILES := \
   lib/builtins/umoddi3.c \
   lib/builtins/umodsi3.c \
   lib/builtins/umodti3.c
+
+# Only build enable_execute_stack.c on non-Windows hosts.
+ifneq ($(HOST_OS),windows)
+libcompiler_rt_common_SRC_FILES += \
+  lib/builtins/enable_execute_stack.c
+endif
 
 # ARM-specific runtimes
 libcompiler_rt_arm_SRC_FILES := \
@@ -384,8 +389,10 @@ LOCAL_MODULE := libcompiler_rt
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 LOCAL_WHOLE_STATIC_LIBRARIES := libcompiler_rt
 LOCAL_CPPFLAGS := -nostdinc++
+ifneq ($(HOST_OS),windows)
 LOCAL_LDFLAGS := -nodefaultlibs
 LOCAL_LDLIBS := -lc -lm
+endif
 LOCAL_MULTILIB := both
 
 include $(BUILD_HOST_SHARED_LIBRARY)
