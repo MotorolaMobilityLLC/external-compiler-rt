@@ -162,6 +162,7 @@ endif
 # ARM-specific runtimes
 libcompiler_rt_arm_SRC_FILES := \
   lib/builtins/arm/aeabi_dcmp.S \
+  lib/builtins/arm/aeabi_div0.c \
   lib/builtins/arm/aeabi_fcmp.S \
   lib/builtins/arm/aeabi_idivmod.S \
   lib/builtins/arm/aeabi_ldivmod.S \
