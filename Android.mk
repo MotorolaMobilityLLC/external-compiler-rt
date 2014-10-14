@@ -22,7 +22,6 @@ LOCAL_PATH := $(call my-dir)
 #
 # Skip apple_versioning.c since it is unused.
 # Skip atomic.c since it needs to be built separately according to the docs.
-# Skip gcc_personality_v0.c since it depends on libunwind.
 libcompiler_rt_common_SRC_FILES := \
   lib/builtins/absvdi2.c \
   lib/builtins/absvsi2.c \
@@ -96,6 +95,7 @@ libcompiler_rt_common_SRC_FILES := \
   lib/builtins/floatuntidf.c \
   lib/builtins/floatuntisf.c \
   lib/builtins/floatuntixf.c \
+  lib/builtins/gcc_personality_v0.c \
   lib/builtins/int_util.c \
   lib/builtins/lshrdi3.c \
   lib/builtins/lshrti3.c \
@@ -373,6 +373,13 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := libcompiler_rt
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 LOCAL_WHOLE_STATIC_LIBRARIES := libcompiler_rt
+LOCAL_SHARED_LIBRARIES := libdl
+LOCAL_STATIC_LIBRARIES_arm := libunwind_llvm
+LOCAL_STATIC_LIBRARIES_arm64 := libunwindbacktrace
+LOCAL_STATIC_LIBRARIES_mips := libunwindbacktrace
+LOCAL_STATIC_LIBRARIES_mips64 := libunwindbacktrace
+LOCAL_STATIC_LIBRARIES_x86 := libunwindbacktrace
+LOCAL_STATIC_LIBRARIES_x86_64 := libunwindbacktrace
 LOCAL_MODULE_TARGET_ARCH := arm arm64 mips mips64 x86 x86_64
 
 include $(BUILD_SHARED_LIBRARY)
@@ -389,10 +396,11 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := libcompiler_rt
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 LOCAL_WHOLE_STATIC_LIBRARIES := libcompiler_rt
+LOCAL_STATIC_LIBRARIES := libunwindbacktrace
 LOCAL_CPPFLAGS := -nostdinc++
 ifneq ($(HOST_OS),windows)
 LOCAL_LDFLAGS := -nodefaultlibs
-LOCAL_LDLIBS := -lc -lm
+LOCAL_LDLIBS := -lpthread -lc -lm
 endif
 LOCAL_MULTILIB := both
 
