@@ -51,6 +51,7 @@ libcompiler_rt_common_SRC_FILES := \
   lib/builtins/divdc3.c \
   lib/builtins/divdf3.c \
   lib/builtins/divdi3.c \
+  lib/builtins/divtf3.c \
   lib/builtins/divmoddi4.c \
   lib/builtins/divmodsi4.c \
   lib/builtins/divsc3.c \
@@ -59,7 +60,9 @@ libcompiler_rt_common_SRC_FILES := \
   lib/builtins/divti3.c \
   lib/builtins/divxc3.c \
   lib/builtins/eprintf.c \
+  lib/builtins/extenddftf2.c \
   lib/builtins/extendsfdf2.c \
+  lib/builtins/extendsftf2.c \
   lib/builtins/ffsdi2.c \
   lib/builtins/ffsti2.c \
   lib/builtins/fixdfdi.c \
@@ -84,6 +87,7 @@ libcompiler_rt_common_SRC_FILES := \
   lib/builtins/floatdixf.c \
   lib/builtins/floatsidf.c \
   lib/builtins/floatsisf.c \
+  lib/builtins/floatsitf.c \
   lib/builtins/floattidf.c \
   lib/builtins/floattisf.c \
   lib/builtins/floattixf.c \
@@ -92,6 +96,7 @@ libcompiler_rt_common_SRC_FILES := \
   lib/builtins/floatundixf.c \
   lib/builtins/floatunsidf.c \
   lib/builtins/floatunsisf.c \
+  lib/builtins/floatunsitf.c \
   lib/builtins/floatuntidf.c \
   lib/builtins/floatuntisf.c \
   lib/builtins/floatuntixf.c \
@@ -141,6 +146,8 @@ libcompiler_rt_common_SRC_FILES := \
   lib/builtins/subvti3.c \
   lib/builtins/trampoline_setup.c \
   lib/builtins/truncdfsf2.c \
+  lib/builtins/trunctfdf2.c \
+  lib/builtins/trunctfsf2.c \
   lib/builtins/ucmpdi2.c \
   lib/builtins/ucmpti2.c \
   lib/builtins/udivdi3.c \
