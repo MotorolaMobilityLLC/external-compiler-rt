@@ -399,7 +399,9 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := libcompiler_rt
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 LOCAL_WHOLE_STATIC_LIBRARIES := libcompiler_rt
+ifneq ($(HOST_OS),darwin)
 LOCAL_STATIC_LIBRARIES := libunwindbacktrace
+endif
 LOCAL_CPPFLAGS := -nostdinc++
 LOCAL_LDFLAGS := -nodefaultlibs
 LOCAL_LDLIBS := -lpthread -lc -lm
