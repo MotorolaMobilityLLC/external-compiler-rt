@@ -391,9 +391,6 @@ LOCAL_MODULE_TARGET_ARCH := arm arm64 mips mips64 x86 x86_64
 
 include $(BUILD_SHARED_LIBRARY)
 
-# Build ASan
-include $(LOCAL_PATH)/lib/asan/Android.mk
-
 #=====================================================================
 # Host Shared Library: libcompiler_rt
 #=====================================================================
@@ -414,5 +411,8 @@ endif
 LOCAL_MULTILIB := both
 
 include $(BUILD_HOST_SHARED_LIBRARY)
+
+# Build asan, lsan, etc.
+include $(call all-makefiles-under,$(LOCAL_PATH)/lib)
 
 endif
