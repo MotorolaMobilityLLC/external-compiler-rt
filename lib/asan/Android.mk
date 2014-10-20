@@ -227,6 +227,7 @@ LOCAL_CFLAGS += $(asan_rtl_cflags)
 LOCAL_SRC_FILES := $(asan_rtl_files) asan_preinit.cc
 LOCAL_CPP_EXTENSION := .cc
 LOCAL_CLANG := true
+LOCAL_MULTILIB := both
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include $(BUILD_HOST_STATIC_LIBRARY)
 
@@ -237,6 +238,9 @@ LOCAL_SRC_FILES := asanwrapper.cc
 LOCAL_CPP_EXTENSION := .cc
 LOCAL_CPPFLAGS := -std=c++11
 LOCAL_CXX_STL := libc++
+LOCAL_MULTILIB := both
+LOCAL_MODULE_STEM_32 := 32
+LOCAL_MODULE_STEM_64 := 64
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include $(BUILD_HOST_EXECUTABLE)
 
@@ -260,6 +264,7 @@ LOCAL_SRC_FILES := tests/asan_noinst_test.cc tests/asan_test_main.cc
 LOCAL_CPP_EXTENSION := .cc
 LOCAL_CLANG := true
 LOCAL_CXX_STL := libc++
+LOCAL_MULTILIB := both
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include $(BUILD_HOST_STATIC_LIBRARY)
 
@@ -278,6 +283,9 @@ LOCAL_STATIC_LIBRARIES := libgtest_libc++_host libasan_noinst_test
 LOCAL_ADDRESS_SANITIZER := true
 LOCAL_CLANG := true
 LOCAL_CXX_STL := libc++
+LOCAL_MULTILIB := both
+LOCAL_MODULE_STEM_32 := 32
+LOCAL_MODULE_STEM_64 := 64
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include $(BUILD_HOST_EXECUTABLE)
 endif
