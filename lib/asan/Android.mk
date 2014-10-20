@@ -17,8 +17,6 @@
 
 LOCAL_PATH:= $(call my-dir)
 
-ifeq ($(TARGET_ARCH),arm)
-
 ASAN_NEEDS_SEGV=0
 ASAN_HAS_EXCEPTIONS=1
 ASAN_FLEXIBLE_MAPPING_AND_OFFSET=0
@@ -44,6 +42,8 @@ asan_rtl_files := \
 	asan_thread.cc	\
 	asan_win.cc \
 	../interception/interception_linux.cc \
+	../lsan/lsan_common.cc \
+	../lsan/lsan_common_linux.cc \
 	../sanitizer_common/sanitizer_allocator.cc \
 	../sanitizer_common/sanitizer_common.cc \
 	../sanitizer_common/sanitizer_common_libcdep.cc \
@@ -90,7 +90,6 @@ asan_rtl_cflags := \
 	-Wno-non-virtual-dtor \
 	-Wno-sign-compare \
 	-Wno-unused-parameter \
-	-D__WORDSIZE=32
 
 asan_test_files := \
 	tests/asan_globals_test.cc \
@@ -110,9 +109,10 @@ asan_test_cflags := \
 	-Wno-non-virtual-dtor \
 	-Wno-sign-compare \
 	-Wno-unused-parameter \
-	-D__WORDSIZE=32 \
 	-std=c++11
 
+
+ifeq ($(TARGET_ARCH),arm)
 
 include $(CLEAR_VARS)
 
@@ -156,7 +156,7 @@ LOCAL_CPP_EXTENSION := .cc
 LOCAL_CPPFLAGS := -std=c++11
 LOCAL_SHARED_LIBRARIES += libc
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
-include external/libcxx/libcxx.mk
+LOCAL_CXX_STL := libc++
 
 include $(BUILD_EXECUTABLE)
 
@@ -166,25 +166,23 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := libasan_noinst_test
 LOCAL_MODULE_TAGS := tests
 LOCAL_C_INCLUDES := \
-        bionic \
-        external/gtest/include \
-        external/compiler-rt/include \
-        external/compiler-rt/lib \
-	external/compiler-rt/lib/asan/tests \
-	external/compiler-rt/lib/sanitizer_common/tests
+    external/gtest/include \
+    external/compiler-rt/include \
+    external/compiler-rt/lib \
+    external/compiler-rt/lib/asan/tests \
+    external/compiler-rt/lib/sanitizer_common/tests
 LOCAL_CFLAGS += \
-        -Wno-unused-parameter \
-        -Wno-sign-compare \
-        -DASAN_UAR=0 \
-        -DASAN_HAS_BLACKLIST=1 \
-	-DASAN_HAS_EXCEPTIONS=$(ASAN_HAS_EXCEPTIONS) \
-	-DASAN_NEEDS_SEGV=$(ASAN_NEEDS_SEGV) \
-        -D__WORDSIZE=32
+    -Wno-unused-parameter \
+    -Wno-sign-compare \
+    -DASAN_UAR=0 \
+    -DASAN_HAS_BLACKLIST=1 \
+    -DASAN_HAS_EXCEPTIONS=$(ASAN_HAS_EXCEPTIONS) \
+    -DASAN_NEEDS_SEGV=$(ASAN_NEEDS_SEGV)
 LOCAL_SRC_FILES := tests/asan_noinst_test.cc tests/asan_test_main.cc
 LOCAL_CPP_EXTENSION := .cc
 LOCAL_CLANG := true
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
-include external/libcxx/libcxx.mk
+LOCAL_CXX_STL := libc++
 
 include $(BUILD_STATIC_LIBRARY)
 
@@ -194,11 +192,10 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := asan_test
 LOCAL_MODULE_TAGS := tests
 LOCAL_C_INCLUDES := \
-        bionic \
-        external/gtest/include \
-        external/compiler-rt/lib \
-	external/compiler-rt/lib/asan/tests \
-	external/compiler-rt/lib/sanitizer_common/tests
+    external/gtest/include \
+    external/compiler-rt/lib \
+    external/compiler-rt/lib/asan/tests \
+    external/compiler-rt/lib/sanitizer_common/tests
 LOCAL_CFLAGS += $(asan_test_cflags)
 LOCAL_SRC_FILES := $(asan_test_files)
 LOCAL_CPP_EXTENSION := .cc
@@ -207,8 +204,73 @@ LOCAL_SHARED_LIBRARIES := libc
 LOCAL_ADDRESS_SANITIZER := true
 LOCAL_CLANG := true
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
-include external/libcxx/libcxx.mk
+LOCAL_CXX_STL := libc++
 
 include $(BUILD_EXECUTABLE)
 
 endif # ifeq($(TARGET_ARCH),arm)
+
+################################################################################
+# Host modules
+
+include $(CLEAR_VARS)
+LOCAL_MODULE := libasan
+LOCAL_MODULE_TAGS := optional
+LOCAL_C_INCLUDES := external/compiler-rt/lib external/compiler-rt/include
+LOCAL_CFLAGS += $(asan_rtl_cflags)
+LOCAL_SRC_FILES := $(asan_rtl_files) asan_preinit.cc
+LOCAL_CPP_EXTENSION := .cc
+LOCAL_CLANG := true
+LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
+include $(BUILD_HOST_STATIC_LIBRARY)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE := asanwrapper
+LOCAL_MODULE_TAGS := eng
+LOCAL_SRC_FILES := asanwrapper.cc
+LOCAL_CPP_EXTENSION := .cc
+LOCAL_CPPFLAGS := -std=c++11
+LOCAL_CXX_STL := libc++
+LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
+include $(BUILD_HOST_EXECUTABLE)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE := libasan_noinst_test
+LOCAL_MODULE_TAGS := tests
+LOCAL_C_INCLUDES := \
+    external/gtest/include \
+    external/compiler-rt/include \
+    external/compiler-rt/lib \
+    external/compiler-rt/lib/asan/tests \
+    external/compiler-rt/lib/sanitizer_common/tests
+LOCAL_CFLAGS += \
+    -Wno-unused-parameter \
+    -Wno-sign-compare \
+    -DASAN_UAR=0 \
+    -DASAN_HAS_BLACKLIST=1 \
+    -DASAN_HAS_EXCEPTIONS=$(ASAN_HAS_EXCEPTIONS) \
+    -DASAN_NEEDS_SEGV=$(ASAN_NEEDS_SEGV)
+LOCAL_SRC_FILES := tests/asan_noinst_test.cc tests/asan_test_main.cc
+LOCAL_CPP_EXTENSION := .cc
+LOCAL_CLANG := true
+LOCAL_CXX_STL := libc++
+LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
+include $(BUILD_HOST_STATIC_LIBRARY)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE := asan_test
+LOCAL_MODULE_TAGS := tests
+LOCAL_C_INCLUDES := \
+    external/gtest/include \
+    external/compiler-rt/lib \
+    external/compiler-rt/lib/asan/tests \
+    external/compiler-rt/lib/sanitizer_common/tests
+LOCAL_CFLAGS += $(asan_test_cflags)
+LOCAL_SRC_FILES := $(asan_test_files)
+LOCAL_CPP_EXTENSION := .cc
+LOCAL_STATIC_LIBRARIES := libgtest_libc++_host libasan_noinst_test
+LOCAL_ADDRESS_SANITIZER := true
+LOCAL_CLANG := true
+LOCAL_CXX_STL := libc++
+LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
+include $(BUILD_HOST_EXECUTABLE)
