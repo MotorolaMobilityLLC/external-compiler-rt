@@ -39,7 +39,6 @@ int main(int argc, char** argv) {
     args[i] = argv[i + 1];
   args[argc - 1] = 0;
 
-  env_prepend("ASAN_OPTIONS", "debug=1,verbosity=1", ",");
   env_prepend("LD_LIBRARY_PATH", "/system/lib/asan", ":");
   env_prepend("LD_PRELOAD", "/system/lib/libasan_preload.so", ":");
 
