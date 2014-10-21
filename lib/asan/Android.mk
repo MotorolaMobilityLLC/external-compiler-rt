@@ -213,6 +213,7 @@ endif # ifeq($(TARGET_ARCH),arm)
 ################################################################################
 # Host modules
 
+ifneq ($(HOST_OS),darwin)
 include $(CLEAR_VARS)
 LOCAL_MODULE := libasan
 LOCAL_MODULE_TAGS := optional
@@ -274,3 +275,4 @@ LOCAL_CLANG := true
 LOCAL_CXX_STL := libc++
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include $(BUILD_HOST_EXECUTABLE)
+endif
