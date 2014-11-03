@@ -357,6 +357,7 @@ LOCAL_MODULE := libcompiler_rt
 LOCAL_ASFLAGS := -integrated-as
 LOCAL_CLANG := true
 LOCAL_SRC_FILES := $(call get-libcompiler-rt-source-files,x86_64)
+LOCAL_ADDRESS_SANITIZER := false
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 LOCAL_MULTILIB := both
 
@@ -370,6 +371,7 @@ include $(CLEAR_VARS)
 
 LOCAL_MODULE = libprofile_rt
 LOCAL_SRC_FILES = lib/profile/GCDAProfiling.c
+LOCAL_ADDRESS_SANITIZER := false
 
 include $(BUILD_STATIC_LIBRARY)
 
