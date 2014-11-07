@@ -17,7 +17,6 @@
 
 LOCAL_PATH := $(call my-dir)
 
-ifeq (,$(TARGET_BUILD_APPS))
 
 # The following list contains platform-independent functionalities.
 #
@@ -60,7 +59,6 @@ libcompiler_rt_common_SRC_FILES := \
   lib/builtins/divsi3.c \
   lib/builtins/divti3.c \
   lib/builtins/divxc3.c \
-  lib/builtins/enable_execute_stack.c \
   lib/builtins/eprintf.c \
   lib/builtins/extenddftf2.c \
   lib/builtins/extendsfdf2.c \
@@ -161,6 +159,12 @@ libcompiler_rt_common_SRC_FILES := \
   lib/builtins/umoddi3.c \
   lib/builtins/umodsi3.c \
   lib/builtins/umodti3.c
+
+# Only build enable_execute_stack.c on non-Windows hosts.
+ifneq ($(HOST_OS),windows)
+libcompiler_rt_common_SRC_FILES += \
+  lib/builtins/enable_execute_stack.c
+endif
 
 # ARM-specific runtimes
 libcompiler_rt_arm_SRC_FILES := \
@@ -405,8 +409,10 @@ ifneq ($(HOST_OS),darwin)
 LOCAL_STATIC_LIBRARIES := libunwindbacktrace
 endif
 LOCAL_CPPFLAGS := -nostdinc++
+ifneq ($(HOST_OS),windows)
 LOCAL_LDFLAGS := -nodefaultlibs
 LOCAL_LDLIBS := -lpthread -lc -lm
+endif
 LOCAL_MULTILIB := both
 LOCAL_ADDRESS_SANITIZER := false
 
@@ -416,5 +422,3 @@ include $(BUILD_HOST_SHARED_LIBRARY)
 include $(call all-makefiles-under,$(LOCAL_PATH)/lib)
 
 endif
-
-endif # TARGET_BUILD_APPS only
