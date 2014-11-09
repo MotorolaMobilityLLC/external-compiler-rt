@@ -275,14 +275,13 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := asan_test
 LOCAL_MODULE_TAGS := tests
 LOCAL_C_INCLUDES := \
-    external/gtest/include \
     external/compiler-rt/lib \
     external/compiler-rt/lib/asan/tests \
     external/compiler-rt/lib/sanitizer_common/tests
 LOCAL_CFLAGS += $(asan_test_cflags)
 LOCAL_SRC_FILES := $(asan_test_files)
 LOCAL_CPP_EXTENSION := .cc
-LOCAL_STATIC_LIBRARIES := libgtest_libc++_host libasan_noinst_test
+LOCAL_STATIC_LIBRARIES := libasan_noinst_test
 LOCAL_ADDRESS_SANITIZER := true
 LOCAL_CLANG := true
 LOCAL_CXX_STL := libc++
@@ -290,5 +289,5 @@ LOCAL_MULTILIB := both
 LOCAL_MODULE_STEM_32 := $(LOCAL_MODULE)32
 LOCAL_MODULE_STEM_64 := $(LOCAL_MODULE)64
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
-include $(BUILD_HOST_EXECUTABLE)
+include $(BUILD_HOST_NATIVE_TEST)
 endif
