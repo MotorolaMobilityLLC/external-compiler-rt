@@ -40,7 +40,7 @@ int main(int argc, char** argv) {
   args[argc - 1] = 0;
 
   env_prepend("LD_LIBRARY_PATH", "/system/lib/asan", ":");
-  env_prepend("LD_PRELOAD", "/system/lib/libasan_preload.so", ":");
+  env_prepend("LD_PRELOAD", "/system/lib/libclang_rt.asan_arm_android.so", ":");
 
   printf("ASAN_OPTIONS: %s\n", getenv("ASAN_OPTIONS"));
   printf("LD_LIBRARY_PATH: %s\n", getenv("LD_LIBRARY_PATH"));
