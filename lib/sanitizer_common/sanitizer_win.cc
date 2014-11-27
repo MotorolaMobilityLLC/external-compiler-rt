@@ -17,9 +17,10 @@
 
 #define WIN32_LEAN_AND_MEAN
 #define NOGDI
-#include <stdlib.h>
-#include <io.h>
 #include <windows.h>
+#include <dbghelp.h>
+#include <io.h>
+#include <stdlib.h>
 
 #include "sanitizer_common.h"
 #include "sanitizer_libc.h"
@@ -64,6 +65,7 @@ uptr GetThreadSelf() {
   return GetTid();
 }
 
+#if !SANITIZER_GO
 void GetThreadStackTopAndBottom(bool at_initialization, uptr *stack_top,
                                 uptr *stack_bottom) {
   CHECK(stack_top);
@@ -76,6 +78,7 @@ void GetThreadStackTopAndBottom(bool at_initialization, uptr *stack_top,
   *stack_top = (uptr)mbi.BaseAddress + mbi.RegionSize;
   *stack_bottom = (uptr)mbi.AllocationBase;
 }
+#endif  // #if !SANITIZER_GO
 
 void *MmapOrDie(uptr size, const char *mem_type) {
   void *rv = VirtualAlloc(0, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
@@ -188,7 +191,7 @@ void DumpProcessMap() {
   UNIMPLEMENTED();
 }
 
-void DisableCoreDumper() {
+void DisableCoreDumperIfNecessary() {
   // Do nothing.
 }
 
@@ -206,6 +209,14 @@ bool StackSizeIsUnlimited() {
 }
 
 void SetStackSizeLimitInBytes(uptr limit) {
+  UNIMPLEMENTED();
+}
+
+bool AddressSpaceIsUnlimited() {
+  UNIMPLEMENTED();
+}
+
+void SetAddressSpaceUnlimited() {
   UNIMPLEMENTED();
 }
 
@@ -432,7 +443,8 @@ void GetThreadStackAndTls(bool main, uptr *stk_addr, uptr *stk_size,
 #endif
 }
 
-void StackTrace::SlowUnwindStack(uptr pc, uptr max_depth) {
+#if !SANITIZER_GO
+void BufferedStackTrace::SlowUnwindStack(uptr pc, uptr max_depth) {
   CHECK_GE(max_depth, 2);
   // FIXME: CaptureStackBackTrace might be too slow for us.
   // FIXME: Compare with StackWalk64.
@@ -447,10 +459,34 @@ void StackTrace::SlowUnwindStack(uptr pc, uptr max_depth) {
   PopStackFrames(pc_location);
 }
 
-void StackTrace::SlowUnwindStackWithContext(uptr pc, void *context,
-                                            uptr max_depth) {
-  UNREACHABLE("no signal context on windows");
+void BufferedStackTrace::SlowUnwindStackWithContext(uptr pc, void *context,
+                                                    uptr max_depth) {
+  CONTEXT ctx = *(CONTEXT *)context;
+  STACKFRAME64 stack_frame;
+  memset(&stack_frame, 0, sizeof(stack_frame));
+  size = 0;
+#if defined(_WIN64)
+  int machine_type = IMAGE_FILE_MACHINE_AMD64;
+  stack_frame.AddrPC.Offset = ctx.Rip;
+  stack_frame.AddrFrame.Offset = ctx.Rbp;
+  stack_frame.AddrStack.Offset = ctx.Rsp;
+#else
+  int machine_type = IMAGE_FILE_MACHINE_I386;
+  stack_frame.AddrPC.Offset = ctx.Eip;
+  stack_frame.AddrFrame.Offset = ctx.Ebp;
+  stack_frame.AddrStack.Offset = ctx.Esp;
+#endif
+  stack_frame.AddrPC.Mode = AddrModeFlat;
+  stack_frame.AddrFrame.Mode = AddrModeFlat;
+  stack_frame.AddrStack.Mode = AddrModeFlat;
+  while (StackWalk64(machine_type, GetCurrentProcess(), GetCurrentThread(),
+                     &stack_frame, &ctx, NULL, &SymFunctionTableAccess64,
+                     &SymGetModuleBase64, NULL) &&
+         size < Min(max_depth, kStackTraceMax)) {
+    trace_buffer[size++] = (uptr)stack_frame.AddrPC.Offset;
+  }
 }
+#endif  // #if !SANITIZER_GO
 
 void MaybeOpenReportFile() {
   // Windows doesn't have native fork, and we don't support Cygwin or other
@@ -484,6 +520,11 @@ void InstallDeadlySignalHandlers(SignalHandlerType handler) {
 bool IsDeadlySignal(int signum) {
   // FIXME: Decide what to do on Windows.
   return false;
+}
+
+bool IsAccessibleMemoryRange(uptr beg, uptr size) {
+  // FIXME: Actually implement this function.
+  return true;
 }
 
 }  // namespace __sanitizer
