@@ -27,6 +27,7 @@
 //   COMMON_INTERCEPTOR_MUTEX_REPAIR
 //   COMMON_INTERCEPTOR_SET_PTHREAD_NAME
 //   COMMON_INTERCEPTOR_HANDLE_RECVMSG
+//   COMMON_INTERCEPTOR_NOTHING_IS_INITIALIZED
 //===----------------------------------------------------------------------===//
 #include "interception/interception.h"
 #include "sanitizer_addrhashmap.h"
@@ -39,6 +40,10 @@
 #if SANITIZER_WINDOWS && !defined(va_copy)
 #define va_copy(dst, src) ((dst) = (src))
 #endif // _WIN32
+
+#if SANITIZER_FREEBSD
+#define pthread_setname_np pthread_set_name_np
+#endif
 
 #ifndef COMMON_INTERCEPTOR_INITIALIZE_RANGE
 #define COMMON_INTERCEPTOR_INITIALIZE_RANGE(p, size) {}
@@ -87,6 +92,10 @@
 #ifndef COMMON_INTERCEPTOR_ENTER_NOIGNORE
 #define COMMON_INTERCEPTOR_ENTER_NOIGNORE(ctx, ...) \
   COMMON_INTERCEPTOR_ENTER(ctx, __VA_ARGS__)
+#endif
+
+#ifndef COMMON_INTERCEPTOR_NOTHING_IS_INITIALIZED
+#define COMMON_INTERCEPTOR_NOTHING_IS_INITIALIZED (0)
 #endif
 
 struct FileMetadata {
@@ -174,6 +183,8 @@ INTERCEPTOR(int, strcmp, const char *s1, const char *s2) {
 }
 
 INTERCEPTOR(int, strncmp, const char *s1, const char *s2, uptr size) {
+  if (COMMON_INTERCEPTOR_NOTHING_IS_INITIALIZED)
+    return internal_strncmp(s1, s2, size);
   void *ctx;
   COMMON_INTERCEPTOR_ENTER(ctx, strncmp, s1, s2, size);
   unsigned char c1 = 0, c2 = 0;
@@ -244,7 +255,7 @@ INTERCEPTOR(void*, memchr, const void *s, int c, SIZE_T n) {
   void *ctx;
   COMMON_INTERCEPTOR_ENTER(ctx, memchr, s, c, n);
   void *res = REAL(memchr)(s, c, n);
-  uptr len = res ? (char*)res - (char*)s + 1 : n;
+  uptr len = res ? (char *)res - (const char *)s + 1 : n;
   COMMON_INTERCEPTOR_READ_RANGE(ctx, s, len);
   return res;
 }
@@ -1030,7 +1041,8 @@ INTERCEPTOR(int, ioctl, int d, unsigned request, void *arg) {
 #endif
 
 #if SANITIZER_INTERCEPT_GETPWNAM_AND_FRIENDS || \
-    SANITIZER_INTERCEPT_GETPWENT || SANITIZER_INTERCEPT_FGETPWENT
+    SANITIZER_INTERCEPT_GETPWENT || SANITIZER_INTERCEPT_FGETPWENT || \
+    SANITIZER_INTERCEPT_GETPWENT_R || SANITIZER_INTERCEPT_GETPWNAM_R_AND_FRIENDS
 static void unpoison_passwd(void *ctx, __sanitizer_passwd *pwd) {
   if (pwd) {
     COMMON_INTERCEPTOR_WRITE_RANGE(ctx, pwd, sizeof(*pwd));
@@ -1077,7 +1089,9 @@ static void unpoison_group(void *ctx, __sanitizer_group *grp) {
   }
 }
 #endif  // SANITIZER_INTERCEPT_GETPWNAM_AND_FRIENDS ||
-        // SANITIZER_INTERCEPT_GETPWENT || SANITIZER_INTERCEPT_FGETPWENT
+        // SANITIZER_INTERCEPT_GETPWENT || SANITIZER_INTERCEPT_FGETPWENT ||
+        // SANITIZER_INTERCEPT_GETPWENT_R ||
+        // SANITIZER_INTERCEPT_GETPWNAM_R_AND_FRIENDS
 
 #if SANITIZER_INTERCEPT_GETPWNAM_AND_FRIENDS
 INTERCEPTOR(__sanitizer_passwd *, getpwnam, const char *name) {
@@ -1428,30 +1442,30 @@ static THREADLOCAL __sanitizer_glob_t *pglob_copy;
 
 static void wrapped_gl_closedir(void *dir) {
   COMMON_INTERCEPTOR_UNPOISON_PARAM(1);
-  IndirectExternCall(pglob_copy->gl_closedir)(dir);
+  pglob_copy->gl_closedir(dir);
 }
 
 static void *wrapped_gl_readdir(void *dir) {
   COMMON_INTERCEPTOR_UNPOISON_PARAM(1);
-  return IndirectExternCall(pglob_copy->gl_readdir)(dir);
+  return pglob_copy->gl_readdir(dir);
 }
 
 static void *wrapped_gl_opendir(const char *s) {
   COMMON_INTERCEPTOR_UNPOISON_PARAM(1);
   COMMON_INTERCEPTOR_INITIALIZE_RANGE(s, REAL(strlen)(s) + 1);
-  return IndirectExternCall(pglob_copy->gl_opendir)(s);
+  return pglob_copy->gl_opendir(s);
 }
 
 static int wrapped_gl_lstat(const char *s, void *st) {
   COMMON_INTERCEPTOR_UNPOISON_PARAM(2);
   COMMON_INTERCEPTOR_INITIALIZE_RANGE(s, REAL(strlen)(s) + 1);
-  return IndirectExternCall(pglob_copy->gl_lstat)(s, st);
+  return pglob_copy->gl_lstat(s, st);
 }
 
 static int wrapped_gl_stat(const char *s, void *st) {
   COMMON_INTERCEPTOR_UNPOISON_PARAM(2);
   COMMON_INTERCEPTOR_INITIALIZE_RANGE(s, REAL(strlen)(s) + 1);
-  return IndirectExternCall(pglob_copy->gl_stat)(s, st);
+  return pglob_copy->gl_stat(s, st);
 }
 
 INTERCEPTOR(int, glob, const char *pattern, int flags,
@@ -1535,8 +1549,14 @@ INTERCEPTOR_WITH_SUFFIX(int, wait, int *status) {
     COMMON_INTERCEPTOR_WRITE_RANGE(ctx, status, sizeof(*status));
   return res;
 }
+// On FreeBSD id_t is always 64-bit wide.
+#if SANITIZER_FREEBSD && (SANITIZER_WORDSIZE == 32)
+INTERCEPTOR_WITH_SUFFIX(int, waitid, int idtype, long long id, void *infop,
+                        int options) {
+#else
 INTERCEPTOR_WITH_SUFFIX(int, waitid, int idtype, int id, void *infop,
                         int options) {
+#endif
   void *ctx;
   COMMON_INTERCEPTOR_ENTER(ctx, waitid, idtype, id, infop, options);
   // FIXME: under ASan the call below may write to freed memory and corrupt
@@ -2613,7 +2633,7 @@ static THREADLOCAL scandir_compar_f scandir_compar;
 static int wrapped_scandir_filter(const struct __sanitizer_dirent *dir) {
   COMMON_INTERCEPTOR_UNPOISON_PARAM(1);
   COMMON_INTERCEPTOR_INITIALIZE_RANGE(dir, dir->d_reclen);
-  return IndirectExternCall(scandir_filter)(dir);
+  return scandir_filter(dir);
 }
 
 static int wrapped_scandir_compar(const struct __sanitizer_dirent **a,
@@ -2623,7 +2643,7 @@ static int wrapped_scandir_compar(const struct __sanitizer_dirent **a,
   COMMON_INTERCEPTOR_INITIALIZE_RANGE(*a, (*a)->d_reclen);
   COMMON_INTERCEPTOR_INITIALIZE_RANGE(b, sizeof(*b));
   COMMON_INTERCEPTOR_INITIALIZE_RANGE(*b, (*b)->d_reclen);
-  return IndirectExternCall(scandir_compar)(a, b);
+  return scandir_compar(a, b);
 }
 
 INTERCEPTOR(int, scandir, char *dirp, __sanitizer_dirent ***namelist,
@@ -2665,7 +2685,7 @@ static THREADLOCAL scandir64_compar_f scandir64_compar;
 static int wrapped_scandir64_filter(const struct __sanitizer_dirent64 *dir) {
   COMMON_INTERCEPTOR_UNPOISON_PARAM(1);
   COMMON_INTERCEPTOR_INITIALIZE_RANGE(dir, dir->d_reclen);
-  return IndirectExternCall(scandir64_filter)(dir);
+  return scandir64_filter(dir);
 }
 
 static int wrapped_scandir64_compar(const struct __sanitizer_dirent64 **a,
@@ -2675,7 +2695,7 @@ static int wrapped_scandir64_compar(const struct __sanitizer_dirent64 **a,
   COMMON_INTERCEPTOR_INITIALIZE_RANGE(*a, (*a)->d_reclen);
   COMMON_INTERCEPTOR_INITIALIZE_RANGE(b, sizeof(*b));
   COMMON_INTERCEPTOR_INITIALIZE_RANGE(*b, (*b)->d_reclen);
-  return IndirectExternCall(scandir64_compar)(a, b);
+  return scandir64_compar(a, b);
 }
 
 INTERCEPTOR(int, scandir64, char *dirp, __sanitizer_dirent64 ***namelist,
@@ -4628,6 +4648,91 @@ INTERCEPTOR(int, dlclose, void *handle) {
 #define INIT_DLOPEN_DLCLOSE
 #endif
 
+#if SANITIZER_INTERCEPT_GETPASS
+INTERCEPTOR(char *, getpass, const char *prompt) {
+  void *ctx;
+  COMMON_INTERCEPTOR_ENTER(ctx, getpass, prompt);
+  if (prompt)
+    COMMON_INTERCEPTOR_READ_RANGE(ctx, prompt, REAL(strlen)(prompt)+1);
+  char *res = REAL(getpass)(prompt);
+  if (res) COMMON_INTERCEPTOR_INITIALIZE_RANGE(res, REAL(strlen)(res)+1);
+  return res;
+}
+
+#define INIT_GETPASS COMMON_INTERCEPT_FUNCTION(getpass);
+#else
+#define INIT_GETPASS
+#endif
+
+#if SANITIZER_INTERCEPT_TIMERFD
+INTERCEPTOR(int, timerfd_settime, int fd, int flags, void *new_value,
+            void *old_value) {
+  void *ctx;
+  COMMON_INTERCEPTOR_ENTER(ctx, timerfd_settime, fd, flags, new_value,
+                           old_value);
+  COMMON_INTERCEPTOR_READ_RANGE(ctx, new_value, struct_itimerspec_sz);
+  int res = REAL(timerfd_settime)(fd, flags, new_value, old_value);
+  if (res != -1 && old_value)
+    COMMON_INTERCEPTOR_WRITE_RANGE(ctx, old_value, struct_itimerspec_sz);
+  return res;
+}
+
+INTERCEPTOR(int, timerfd_gettime, int fd, void *curr_value) {
+  void *ctx;
+  COMMON_INTERCEPTOR_ENTER(ctx, timerfd_gettime, fd, curr_value);
+  int res = REAL(timerfd_gettime)(fd, curr_value);
+  if (res != -1 && curr_value)
+    COMMON_INTERCEPTOR_WRITE_RANGE(ctx, curr_value, struct_itimerspec_sz);
+  return res;
+}
+#define INIT_TIMERFD                          \
+  COMMON_INTERCEPT_FUNCTION(timerfd_settime); \
+  COMMON_INTERCEPT_FUNCTION(timerfd_gettime);
+#else
+#define INIT_TIMERFD
+#endif
+
+#if SANITIZER_INTERCEPT_MLOCKX
+// Linux kernel has a bug that leads to kernel deadlock if a process
+// maps TBs of memory and then calls mlock().
+static void MlockIsUnsupported() {
+  static atomic_uint8_t printed;
+  if (atomic_exchange(&printed, 1, memory_order_relaxed))
+    return;
+  VPrintf(1, "INFO: %s ignores mlock/mlockall/munlock/munlockall\n",
+          SanitizerToolName);
+}
+
+INTERCEPTOR(int, mlock, const void *addr, uptr len) {
+  MlockIsUnsupported();
+  return 0;
+}
+
+INTERCEPTOR(int, munlock, const void *addr, uptr len) {
+  MlockIsUnsupported();
+  return 0;
+}
+
+INTERCEPTOR(int, mlockall, int flags) {
+  MlockIsUnsupported();
+  return 0;
+}
+
+INTERCEPTOR(int, munlockall, void) {
+  MlockIsUnsupported();
+  return 0;
+}
+
+#define INIT_MLOCKX                                                            \
+  COMMON_INTERCEPT_FUNCTION(mlock);                                            \
+  COMMON_INTERCEPT_FUNCTION(munlock);                                          \
+  COMMON_INTERCEPT_FUNCTION(mlockall);                                         \
+  COMMON_INTERCEPT_FUNCTION(munlockall);
+
+#else
+#define INIT_MLOCKX
+#endif  // SANITIZER_INTERCEPT_MLOCKX
+
 static void InitializeCommonInterceptors() {
   static u64 metadata_mem[sizeof(MetadataHashMap) / sizeof(u64) + 1];
   interceptor_metadata_map = new((void *)&metadata_mem) MetadataHashMap();
@@ -4786,4 +4891,7 @@ static void InitializeCommonInterceptors() {
   INIT_FFLUSH;
   INIT_FCLOSE;
   INIT_DLOPEN_DLCLOSE;
+  INIT_GETPASS;
+  INIT_TIMERFD;
+  INIT_MLOCKX;
 }
