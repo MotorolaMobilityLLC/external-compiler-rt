@@ -25,15 +25,25 @@
 # define MSAN_REPLACE_OPERATORS_NEW_AND_DELETE 1
 #endif
 
+#if defined(__mips64)
+#define MEM_TO_SHADOW(mem)       (((uptr)mem) & ~0x4000000000ULL)
+#define SHADOW_TO_ORIGIN(shadow) (((uptr)shadow) + 0x2000000000ULL)
+#define MEM_TO_ORIGIN(mem)       (SHADOW_TO_ORIGIN(MEM_TO_SHADOW(mem)))
+#define MEM_IS_APP(mem)          ((uptr)mem >= 0xe000000000ULL)
+#define MEM_IS_SHADOW(mem) \
+  ((uptr)mem >= 0xa000000000ULL && (uptr)mem <= 0xc000000000ULL)
+#elif defined(__x86_64__)
 #define MEM_TO_SHADOW(mem)       (((uptr)mem) & ~0x400000000000ULL)
 #define SHADOW_TO_ORIGIN(shadow) (((uptr)shadow) + 0x200000000000ULL)
 #define MEM_TO_ORIGIN(mem)       (SHADOW_TO_ORIGIN(MEM_TO_SHADOW(mem)))
 #define MEM_IS_APP(mem)          ((uptr)mem >= 0x600000000000ULL)
 #define MEM_IS_SHADOW(mem) \
   ((uptr)mem >= 0x200000000000ULL && (uptr)mem <= 0x400000000000ULL)
+#endif
 
-const int kMsanParamTlsSizeInWords = 100;
-const int kMsanRetvalTlsSizeInWords = 100;
+// These constants must be kept in sync with the ones in MemorySanitizer.cc.
+const int kMsanParamTlsSize = 800;
+const int kMsanRetvalTlsSize = 800;
 
 namespace __msan {
 extern int msan_inited;
@@ -64,14 +74,11 @@ struct SymbolizerScope {
   ~SymbolizerScope() { ExitSymbolizer(); }
 };
 
-void EnterLoader();
-void ExitLoader();
-
 void MsanDie();
 void PrintWarning(uptr pc, uptr bp);
 void PrintWarningWithOrigin(uptr pc, uptr bp, u32 origin);
 
-void GetStackTrace(StackTrace *stack, uptr max_s, uptr pc, uptr bp,
+void GetStackTrace(BufferedStackTrace *stack, uptr max_s, uptr pc, uptr bp,
                    bool request_fast_unwind);
 
 void ReportUMR(StackTrace *stack, u32 origin);
@@ -96,27 +103,24 @@ void CopyPoison(void *dst, const void *src, uptr size, StackTrace *stack);
 // the previous origin id.
 u32 ChainOrigin(u32 id, StackTrace *stack);
 
-#define GET_MALLOC_STACK_TRACE                                     \
-  StackTrace stack;                                                \
-  stack.size = 0;                                                  \
-  if (__msan_get_track_origins() && msan_inited)                   \
-    GetStackTrace(&stack, common_flags()->malloc_context_size,     \
-        StackTrace::GetCurrentPc(), GET_CURRENT_FRAME(),           \
-        common_flags()->fast_unwind_on_malloc)
-
-#define GET_STORE_STACK_TRACE_PC_BP(pc, bp)                  \
-  StackTrace stack;                                          \
-  stack.size = 0;                                            \
-  if (__msan_get_track_origins() > 1 && msan_inited)         \
-  GetStackTrace(&stack, flags()->store_context_size, pc, bp, \
+#define GET_MALLOC_STACK_TRACE                                                 \
+  BufferedStackTrace stack;                                                    \
+  if (__msan_get_track_origins() && msan_inited)                               \
+  GetStackTrace(&stack, common_flags()->malloc_context_size,                   \
+                StackTrace::GetCurrentPc(), GET_CURRENT_FRAME(),               \
                 common_flags()->fast_unwind_on_malloc)
 
-#define GET_FATAL_STACK_TRACE_PC_BP(pc, bp)       \
-  StackTrace stack;                               \
-  stack.size = 0;                                 \
-  if (msan_inited)                                \
-    GetStackTrace(&stack, kStackTraceMax, pc, bp, \
-                  common_flags()->fast_unwind_on_fatal)
+#define GET_STORE_STACK_TRACE_PC_BP(pc, bp)                                    \
+  BufferedStackTrace stack;                                                    \
+  if (__msan_get_track_origins() > 1 && msan_inited)                           \
+  GetStackTrace(&stack, flags()->store_context_size, pc, bp,                   \
+                common_flags()->fast_unwind_on_malloc)
+
+#define GET_FATAL_STACK_TRACE_PC_BP(pc, bp)                                    \
+  BufferedStackTrace stack;                                                    \
+  if (msan_inited)                                                             \
+  GetStackTrace(&stack, kStackTraceMax, pc, bp,                                \
+                common_flags()->fast_unwind_on_fatal)
 
 #define GET_STORE_STACK_TRACE \
   GET_STORE_STACK_TRACE_PC_BP(StackTrace::GetCurrentPc(), GET_CURRENT_FRAME())
@@ -141,10 +145,8 @@ void MsanTSDDtor(void *tsd);
 }  // namespace __msan
 
 #define MSAN_MALLOC_HOOK(ptr, size) \
-  if (&__msan_malloc_hook) __msan_malloc_hook(ptr, size); \
   if (&__sanitizer_malloc_hook) __sanitizer_malloc_hook(ptr, size)
 #define MSAN_FREE_HOOK(ptr) \
-  if (&__msan_free_hook) __msan_free_hook(ptr); \
   if (&__sanitizer_free_hook) __sanitizer_free_hook(ptr)
 
 #endif  // MSAN_H
