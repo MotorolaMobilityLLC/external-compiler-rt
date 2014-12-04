@@ -167,16 +167,16 @@ uptr ReadFileToBuffer(const char *file_name, char **buff,
 void *MapFileToMemory(const char *file_name, uptr *buff_size);
 void *MapWritableFileToMemory(void *addr, uptr size, uptr fd, uptr offset);
 
+bool IsAccessibleMemoryRange(uptr beg, uptr size);
+
 // Error report formatting.
 const char *StripPathPrefix(const char *filepath,
                             const char *strip_file_prefix);
-void PrintSourceLocation(InternalScopedString *buffer, const char *file,
-                         int line, int column);
-void PrintModuleAndOffset(InternalScopedString *buffer,
-                          const char *module, uptr offset);
+// Strip the directories from the module name.
+const char *StripModuleName(const char *module);
 
 // OS
-void DisableCoreDumper();
+void DisableCoreDumperIfNecessary();
 void DumpProcessMap();
 bool FileExists(const char *filename);
 const char *GetEnv(const char *name);
@@ -187,6 +187,8 @@ u32 GetUid();
 void ReExec();
 bool StackSizeIsUnlimited();
 void SetStackSizeLimitInBytes(uptr limit);
+bool AddressSpaceIsUnlimited();
+void SetAddressSpaceUnlimited();
 void AdjustStackSize(void *attr);
 void PrepareForSandboxing(__sanitizer_sandbox_arguments *args);
 void CovPrepareForSandboxing(__sanitizer_sandbox_arguments *args);
@@ -205,9 +207,6 @@ void SleepForMillis(int millis);
 u64 NanoTime();
 int Atexit(void (*function)(void));
 void SortArray(uptr *array, uptr size);
-// Strip the directories from the module name, return a new string allocated
-// with internal_strdup.
-char *StripModuleName(const char *module);
 
 // Exit
 void NORETURN Abort();
@@ -246,7 +245,7 @@ const int kMaxSummaryLength = 1024;
 // and pass it to __sanitizer_report_error_summary.
 void ReportErrorSummary(const char *error_message);
 // Same as above, but construct error_message as:
-//   error_type: file:line function
+//   error_type file:line function
 void ReportErrorSummary(const char *error_type, const char *file,
                         int line, const char *function);
 void ReportErrorSummary(const char *error_type, StackTrace *trace);
@@ -523,23 +522,6 @@ const uptr kPthreadDestructorIterations = 0;
 
 // Callback type for iterating over a set of memory ranges.
 typedef void (*RangeIteratorCallback)(uptr begin, uptr end, void *arg);
-
-#if (SANITIZER_FREEBSD || SANITIZER_LINUX) && !defined(SANITIZER_GO)
-extern uptr indirect_call_wrapper;
-void SetIndirectCallWrapper(uptr wrapper);
-
-template <typename F>
-F IndirectExternCall(F f) {
-  typedef F (*WrapF)(F);
-  return indirect_call_wrapper ? ((WrapF)indirect_call_wrapper)(f) : f;
-}
-#else
-INLINE void SetIndirectCallWrapper(uptr wrapper) {}
-template <typename F>
-F IndirectExternCall(F f) {
-  return f;
-}
-#endif
 
 #if SANITIZER_ANDROID
 // Initialize Android logging. Any writes before this are silently lost.
