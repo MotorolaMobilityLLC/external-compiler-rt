@@ -34,27 +34,25 @@ using namespace __sanitizer;
 static THREADLOCAL int msan_expect_umr = 0;
 static THREADLOCAL int msan_expected_umr_found = 0;
 
-static bool msan_running_under_dr;
-
 // Function argument shadow. Each argument starts at the next available 8-byte
 // aligned address.
 SANITIZER_INTERFACE_ATTRIBUTE
-THREADLOCAL u64 __msan_param_tls[kMsanParamTlsSizeInWords];
+THREADLOCAL u64 __msan_param_tls[kMsanParamTlsSize / sizeof(u64)];
 
 // Function argument origin. Each argument starts at the same offset as the
 // corresponding shadow in (__msan_param_tls). Slightly weird, but changing this
 // would break compatibility with older prebuilt binaries.
 SANITIZER_INTERFACE_ATTRIBUTE
-THREADLOCAL u32 __msan_param_origin_tls[kMsanParamTlsSizeInWords];
+THREADLOCAL u32 __msan_param_origin_tls[kMsanParamTlsSize / sizeof(u32)];
 
 SANITIZER_INTERFACE_ATTRIBUTE
-THREADLOCAL u64 __msan_retval_tls[kMsanRetvalTlsSizeInWords];
+THREADLOCAL u64 __msan_retval_tls[kMsanRetvalTlsSize / sizeof(u64)];
 
 SANITIZER_INTERFACE_ATTRIBUTE
 THREADLOCAL u32 __msan_retval_origin_tls;
 
 SANITIZER_INTERFACE_ATTRIBUTE
-THREADLOCAL u64 __msan_va_arg_tls[kMsanParamTlsSizeInWords];
+THREADLOCAL u64 __msan_va_arg_tls[kMsanParamTlsSize / sizeof(u64)];
 
 SANITIZER_INTERFACE_ATTRIBUTE
 THREADLOCAL u64 __msan_va_arg_overflow_size_tls;
@@ -63,7 +61,6 @@ SANITIZER_INTERFACE_ATTRIBUTE
 THREADLOCAL u32 __msan_origin_tls;
 
 static THREADLOCAL int is_in_symbolizer;
-static THREADLOCAL int is_in_loader;
 
 extern "C" SANITIZER_WEAK_ATTRIBUTE const int __msan_track_origins;
 
@@ -78,14 +75,6 @@ namespace __msan {
 void EnterSymbolizer() { ++is_in_symbolizer; }
 void ExitSymbolizer()  { --is_in_symbolizer; }
 bool IsInSymbolizer() { return is_in_symbolizer; }
-
-void EnterLoader() { ++is_in_loader; }
-void ExitLoader()  { --is_in_loader; }
-
-extern "C" {
-SANITIZER_INTERFACE_ATTRIBUTE
-bool __msan_is_in_loader() { return is_in_loader; }
-}
 
 static Flags msan_flags;
 
@@ -187,7 +176,7 @@ static void InitializeFlags(Flags *f, const char *options) {
   ParseFlagsFromString(f, options);
 }
 
-void GetStackTrace(StackTrace *stack, uptr max_s, uptr pc, uptr bp,
+void GetStackTrace(BufferedStackTrace *stack, uptr max_s, uptr pc, uptr bp,
                    bool request_fast_unwind) {
   MsanThread *t = GetCurrentThread();
   if (!t || !StackTrace::WillUseFastUnwind(request_fast_unwind)) {
@@ -280,16 +269,19 @@ u32 ChainOrigin(u32 id, StackTrace *stack) {
     }
   }
 
-  StackDepotHandle h = StackDepotPut_WithHandle(stack->trace, stack->size);
+  StackDepotHandle h = StackDepotPut_WithHandle(*stack);
   if (!h.valid()) return id;
-  int use_count = h.use_count();
-  if (use_count > flags()->origin_history_per_stack_limit)
-    return id;
+
+  if (flags()->origin_history_per_stack_limit > 0) {
+    int use_count = h.use_count();
+    if (use_count > flags()->origin_history_per_stack_limit) return id;
+  }
 
   u32 chained_id;
   bool inserted = ChainedOriginDepotPut(h.id(), o.id(), &chained_id);
 
-  if (inserted) h.inc_use_count_unsafe();
+  if (inserted && flags()->origin_history_per_stack_limit > 0)
+    h.inc_use_count_unsafe();
 
   return Origin(chained_id, depth).raw_id();
 }
@@ -377,6 +369,7 @@ void __msan_init() {
 
   if (MSAN_REPLACE_OPERATORS_NEW_AND_DELETE)
     ReplaceOperatorsNewAndDelete();
+  DisableCoreDumperIfNecessary();
   if (StackSizeIsUnlimited()) {
     VPrintf(1, "Unlimited stack, doing reexec\n");
     // A reasonably large stack size. It is bigger than the usual 8Mb, because,
@@ -390,7 +383,7 @@ void __msan_init() {
   __msan_clear_on_return();
   if (__msan_get_track_origins())
     VPrintf(1, "msan_track_origins\n");
-  if (!InitShadow(/* prot1 */ !msan_running_under_dr, /* prot2 */ true,
+  if (!InitShadow(/* prot1 */ true, /* prot2 */ true,
                   /* map_shadow */ true, __msan_get_track_origins())) {
     Printf("FATAL: MemorySanitizer can not mmap the shadow memory.\n");
     Printf("FATAL: Make sure to compile with -fPIE and to link with -pie.\n");
@@ -401,8 +394,7 @@ void __msan_init() {
     Die();
   }
 
-  Symbolizer::Init(common_flags()->external_symbolizer_path);
-  Symbolizer::Get()->AddHooks(EnterSymbolizer, ExitSymbolizer);
+  Symbolizer::GetOrInit()->AddHooks(EnterSymbolizer, ExitSymbolizer);
 
   MsanTSDInit(MsanTSDDtor);
 
@@ -482,7 +474,7 @@ void __msan_check_mem_is_initialized(const void *x, uptr size) {
   (void)sp;
   ReportUMRInsideAddressRange(__func__, x, size, offset);
   __msan::PrintWarningWithOrigin(pc, bp,
-                                 __msan_get_origin(((char *)x) + offset));
+                                 __msan_get_origin(((const char *)x) + offset));
   if (__msan::flags()->halt_on_error) {
     Printf("Exiting\n");
     Die();
@@ -495,38 +487,11 @@ int __msan_set_poison_in_malloc(int do_poison) {
   return old;
 }
 
-int  __msan_has_dynamic_component() {
-  return msan_running_under_dr;
-}
+int __msan_has_dynamic_component() { return false; }
 
 NOINLINE
 void __msan_clear_on_return() {
   __msan_param_tls[0] = 0;
-}
-
-static void* get_tls_base() {
-  u64 p;
-  asm("mov %%fs:0, %0"
-      : "=r"(p) ::);
-  return (void*)p;
-}
-
-int __msan_get_retval_tls_offset() {
-  // volatile here is needed to avoid UB, because the compiler thinks that we
-  // are doing address arithmetics on unrelated pointers, and takes some
-  // shortcuts
-  volatile sptr retval_tls_p = (sptr)&__msan_retval_tls;
-  volatile sptr tls_base_p = (sptr)get_tls_base();
-  return retval_tls_p - tls_base_p;
-}
-
-int __msan_get_param_tls_offset() {
-  // volatile here is needed to avoid UB, because the compiler thinks that we
-  // are doing address arithmetics on unrelated pointers, and takes some
-  // shortcuts
-  volatile sptr param_tls_p = (sptr)&__msan_param_tls;
-  volatile sptr tls_base_p = (sptr)get_tls_base();
-  return param_tls_p - tls_base_p;
 }
 
 void __msan_partial_poison(const void* data, void* shadow, uptr size) {
@@ -562,11 +527,11 @@ void __msan_set_origin(const void *a, uptr size, u32 origin) {
 // 'descr' is created at compile time and contains '----' in the beginning.
 // When we see descr for the first time we replace '----' with a uniq id
 // and set the origin to (id | (31-th bit)).
-void __msan_set_alloca_origin(void *a, uptr size, const char *descr) {
+void __msan_set_alloca_origin(void *a, uptr size, char *descr) {
   __msan_set_alloca_origin4(a, size, descr, 0);
 }
 
-void __msan_set_alloca_origin4(void *a, uptr size, const char *descr, uptr pc) {
+void __msan_set_alloca_origin4(void *a, uptr size, char *descr, uptr pc) {
   static const u32 dash = '-';
   static const u32 first_timer =
       dash + (dash << 8) + (dash << 16) + (dash << 24);
@@ -652,18 +617,6 @@ void __sanitizer_unaligned_store64(uu64 *p, u64 x) {
 
 void __msan_set_death_callback(void (*callback)(void)) {
   death_callback = callback;
-}
-
-void *__msan_wrap_indirect_call(void *target) {
-  return IndirectExternCall(target);
-}
-
-void __msan_dr_is_initialized() {
-  msan_running_under_dr = true;
-}
-
-void __msan_set_indirect_call_wrapper(uptr wrapper) {
-  SetIndirectCallWrapper(wrapper);
 }
 
 #if !SANITIZER_SUPPORTS_WEAK_HOOKS
