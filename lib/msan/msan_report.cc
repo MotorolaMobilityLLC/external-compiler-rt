@@ -46,15 +46,15 @@ static void DescribeStackOrigin(const char *so, uptr pc) {
   Printf(
       "  %sUninitialized value was created by an allocation of '%s%s%s'"
       " in the stack frame of function '%s%s%s'%s\n",
-      d.Origin(), d.Name(), s, d.Origin(), d.Name(),
-      Symbolizer::Get()->Demangle(sep + 1), d.Origin(), d.End());
+      d.Origin(), d.Name(), s, d.Origin(), d.Name(), sep + 1, d.Origin(),
+      d.End());
   InternalFree(s);
 
   if (pc) {
     // For some reason function address in LLVM IR is 1 less then the address
     // of the first instruction.
-    pc += 1;
-    StackTrace::PrintStack(&pc, 1);
+    pc = StackTrace::GetNextInstructionPc(pc);
+    StackTrace(&pc, 1).Print();
   }
 }
 
@@ -77,20 +77,16 @@ static void DescribeOrigin(u32 id) {
       DescribeStackOrigin(so, pc);
       break;
     } else if (prev_o.isHeapRoot()) {
-      uptr size = 0;
-      const uptr *trace = StackDepotGet(stack_id, &size);
       Printf("  %sUninitialized value was created by a heap allocation%s\n",
              d.Origin(), d.End());
-      StackTrace::PrintStack(trace, size);
+      StackDepotGet(stack_id).Print();
       break;
     } else {
       // chained origin
-      uptr size = 0;
-      const uptr *trace = StackDepotGet(stack_id, &size);
       // FIXME: copied? modified? passed through? observed?
       Printf("  %sUninitialized value was stored to memory at%s\n", d.Origin(),
              d.End());
-      StackTrace::PrintStack(trace, size);
+      StackDepotGet(stack_id).Print();
       id = prev_id;
     }
   }
