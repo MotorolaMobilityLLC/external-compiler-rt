@@ -157,7 +157,6 @@ static void BackgroundThread(void *arg) {
   }
 
   u64 last_flush = NanoTime();
-  u64 last_rss_check = NanoTime();
   uptr last_rss = 0;
   for (int i = 0;
       atomic_load(&ctx->stop_background_thread, memory_order_relaxed) == 0;
@@ -168,29 +167,23 @@ static void BackgroundThread(void *arg) {
     // Flush memory if requested.
     if (flags()->flush_memory_ms > 0) {
       if (last_flush + flags()->flush_memory_ms * kMs2Ns < now) {
-        if (flags()->verbosity > 0)
-          Printf("ThreadSanitizer: periodic memory flush\n");
+        VPrintf(1, "ThreadSanitizer: periodic memory flush\n");
         FlushShadowMemory();
         last_flush = NanoTime();
       }
     }
     // GetRSS can be expensive on huge programs, so don't do it every 100ms.
-    if (flags()->memory_limit_mb > 0 && last_rss_check + 1000 * kMs2Ns < now) {
-      last_rss_check = now;
+    if (flags()->memory_limit_mb > 0) {
       uptr rss = GetRSS();
       uptr limit = uptr(flags()->memory_limit_mb) << 20;
-      if (flags()->verbosity > 0) {
-        Printf("ThreadSanitizer: memory flush check"
-               " RSS=%llu LAST=%llu LIMIT=%llu\n",
-               (u64)rss>>20, (u64)last_rss>>20, (u64)limit>>20);
-      }
+      VPrintf(1, "ThreadSanitizer: memory flush check"
+                 " RSS=%llu LAST=%llu LIMIT=%llu\n",
+              (u64)rss >> 20, (u64)last_rss >> 20, (u64)limit >> 20);
       if (2 * rss > limit + last_rss) {
-        if (flags()->verbosity > 0)
-          Printf("ThreadSanitizer: flushing memory due to RSS\n");
+        VPrintf(1, "ThreadSanitizer: flushing memory due to RSS\n");
         FlushShadowMemory();
         rss = GetRSS();
-        if (flags()->verbosity > 0)
-          Printf("ThreadSanitizer: memory flushed RSS=%llu\n", (u64)rss>>20);
+        VPrintf(1, "ThreadSanitizer: memory flushed RSS=%llu\n", (u64)rss>>20);
       }
       last_rss = rss;
     }
@@ -268,14 +261,36 @@ void MapShadow(uptr addr, uptr size) {
 
 void MapThreadTrace(uptr addr, uptr size) {
   DPrintf("#0: Mapping trace at %p-%p(0x%zx)\n", addr, addr + size, size);
-  CHECK_GE(addr, kTraceMemBegin);
-  CHECK_LE(addr + size, kTraceMemBegin + kTraceMemSize);
+  CHECK_GE(addr, kTraceMemBeg);
+  CHECK_LE(addr + size, kTraceMemEnd);
   CHECK_EQ(addr, addr & ~((64 << 10) - 1));  // windows wants 64K alignment
   uptr addr1 = (uptr)MmapFixedNoReserve(addr, size);
   if (addr1 != addr) {
     Printf("FATAL: ThreadSanitizer can not mmap thread trace (%p/%p->%p)\n",
         addr, size, addr1);
     Die();
+  }
+}
+
+static void CheckShadowMapping() {
+  for (uptr i = 0; i < ARRAY_SIZE(UserRegions); i += 2) {
+    const uptr beg = UserRegions[i];
+    const uptr end = UserRegions[i + 1];
+    VPrintf(3, "checking shadow region %p-%p\n", beg, end);
+    for (uptr p0 = beg; p0 <= end; p0 += (end - beg) / 4) {
+      for (int x = -1; x <= 1; x++) {
+        const uptr p = p0 + x;
+        if (p < beg || p >= end)
+          continue;
+        const uptr s = MemToShadow(p);
+        VPrintf(3, "  checking pointer %p -> %p\n", p, s);
+        CHECK(IsAppMem(p));
+        CHECK(IsShadowMem(s));
+        CHECK_EQ(p & ~(kShadowCell - 1), ShadowToMem(s));
+        const uptr m = (uptr)MemToMeta(p);
+        CHECK(IsMetaMem(m));
+      }
+    }
   }
 }
 
@@ -291,36 +306,36 @@ void Initialize(ThreadState *thr) {
   // Install tool-specific callbacks in sanitizer_common.
   SetCheckFailedCallback(TsanCheckFailed);
 
+  ctx = new(ctx_placeholder) Context;
+  const char *options = GetEnv(kTsanOptionsEnv);
+  InitializeFlags(&ctx->flags, options);
 #ifndef TSAN_GO
   InitializeAllocator();
 #endif
   InitializeInterceptors();
-  const char *env = InitializePlatform();
+  CheckShadowMapping();
+  InitializePlatform();
   InitializeMutex();
   InitializeDynamicAnnotations();
-  ctx = new(ctx_placeholder) Context;
 #ifndef TSAN_GO
   InitializeShadowMemory();
 #endif
-  InitializeFlags(&ctx->flags, env);
   // Setup correct file descriptor for error reports.
-  __sanitizer_set_report_path(flags()->log_path);
+  __sanitizer_set_report_path(common_flags()->log_path);
   InitializeSuppressions();
 #ifndef TSAN_GO
   InitializeLibIgnore();
-  Symbolizer::Init(common_flags()->external_symbolizer_path);
-  Symbolizer::Get()->AddHooks(EnterSymbolizer, ExitSymbolizer);
+  Symbolizer::GetOrInit()->AddHooks(EnterSymbolizer, ExitSymbolizer);
 #endif
   StartBackgroundThread();
 #ifndef TSAN_GO
   SetSandboxingCallback(StopBackgroundThread);
 #endif
-  if (flags()->detect_deadlocks)
+  if (common_flags()->detect_deadlocks)
     ctx->dd = DDetector::Create(flags());
 
-  if (ctx->flags.verbosity)
-    Printf("***** Running under ThreadSanitizer v2 (pid %d) *****\n",
-           (int)internal_getpid());
+  VPrintf(1, "***** Running under ThreadSanitizer v2 (pid %d) *****\n",
+          (int)internal_getpid());
 
   // Initialize thread 0.
   int tid = ThreadCreate(thr, 0, 0, true);
@@ -339,7 +354,6 @@ void Initialize(ThreadState *thr) {
 }
 
 int Finalize(ThreadState *thr) {
-  Context *ctx = __tsan::ctx;
   bool failed = false;
 
   if (flags()->atexit_sleep_ms > 0 && ThreadCount(thr) > 1)
@@ -352,7 +366,7 @@ int Finalize(ThreadState *thr) {
   ctx->report_mtx.Unlock();
 
 #ifndef TSAN_GO
-  if (ctx->flags.verbosity)
+  if (common_flags()->verbosity)
     AllocatorPrintStats();
 #endif
 
@@ -373,7 +387,7 @@ int Finalize(ThreadState *thr) {
         ctx->nmissed_expected);
   }
 
-  if (flags()->print_suppressions)
+  if (common_flags()->print_suppressions)
     PrintMatchedSuppressions();
 #ifndef TSAN_GO
   if (flags()->print_benign)
@@ -448,8 +462,8 @@ u32 CurrentStackId(ThreadState *thr, uptr pc) {
     thr->shadow_stack_pos[0] = pc;
     thr->shadow_stack_pos++;
   }
-  u32 id = StackDepotPut(thr->shadow_stack,
-                         thr->shadow_stack_pos - thr->shadow_stack);
+  u32 id = StackDepotPut(
+      StackTrace(thr->shadow_stack, thr->shadow_stack_pos - thr->shadow_stack));
   if (pc != 0)
     thr->shadow_stack_pos--;
   return id;
@@ -462,7 +476,7 @@ void TraceSwitch(ThreadState *thr) {
   unsigned trace = (thr->fast_state.epoch() / kTracePartSize) % TraceParts();
   TraceHeader *hdr = &thr_trace->headers[trace];
   hdr->epoch0 = thr->fast_state.epoch();
-  hdr->stack0.ObtainCurrent(thr, 0);
+  ObtainCurrentStack(thr, 0, &hdr->stack0);
   hdr->mset0 = thr->mset;
   thr->nomalloc--;
 }
@@ -608,13 +622,13 @@ void UnalignedMemoryAccess(ThreadState *thr, uptr pc, uptr addr,
   while (size) {
     int size1 = 1;
     int kAccessSizeLog = kSizeLog1;
-    if (size >= 8 && (addr & ~7) == ((addr + 8) & ~7)) {
+    if (size >= 8 && (addr & ~7) == ((addr + 7) & ~7)) {
       size1 = 8;
       kAccessSizeLog = kSizeLog8;
-    } else if (size >= 4 && (addr & ~7) == ((addr + 4) & ~7)) {
+    } else if (size >= 4 && (addr & ~7) == ((addr + 3) & ~7)) {
       size1 = 4;
       kAccessSizeLog = kSizeLog4;
-    } else if (size >= 2 && (addr & ~7) == ((addr + 2) & ~7)) {
+    } else if (size >= 2 && (addr & ~7) == ((addr + 1) & ~7)) {
       size1 = 2;
       kAccessSizeLog = kSizeLog2;
     }
@@ -701,6 +715,8 @@ ALWAYS_INLINE
 bool ContainsSameAccess(u64 *s, u64 a, u64 sync_epoch, bool is_write) {
 #if defined(__SSE3__) && TSAN_SHADOW_COUNT == 4
   bool res = ContainsSameAccessFast(s, a, sync_epoch, is_write);
+  // NOTE: this check can fail if the shadow is concurrently mutated
+  // by other threads.
   DCHECK_EQ(res, ContainsSameAccessSlow(s, a, sync_epoch, is_write));
   return res;
 #else
