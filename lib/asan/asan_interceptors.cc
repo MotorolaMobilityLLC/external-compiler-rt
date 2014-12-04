@@ -148,6 +148,7 @@ DECLARE_REAL_AND_INTERCEPTOR(void, free, void *)
 #define COMMON_INTERCEPTOR_ON_EXIT(ctx) OnExit()
 #define COMMON_INTERCEPTOR_LIBRARY_LOADED(filename, res) CovUpdateMapping()
 #define COMMON_INTERCEPTOR_LIBRARY_UNLOADED() CovUpdateMapping()
+#define COMMON_INTERCEPTOR_NOTHING_IS_INITIALIZED (!asan_inited)
 #include "sanitizer_common/sanitizer_common_interceptors.inc"
 
 #define COMMON_SYSCALL_PRE_READ_RANGE(p, s) ASAN_READ_RANGE(p, s)
@@ -221,8 +222,8 @@ INTERCEPTOR(int, sigaction, int signum, const struct sigaction *act,
 
 namespace __sanitizer {
 int real_sigaction(int signum, const void *act, void *oldact) {
-  return REAL(sigaction)(signum,
-                         (struct sigaction *)act, (struct sigaction *)oldact);
+  return REAL(sigaction)(signum, (const struct sigaction *)act,
+                         (struct sigaction *)oldact);
 }
 }  // namespace __sanitizer
 
@@ -295,37 +296,27 @@ INTERCEPTOR(void, __cxa_throw, void *a, void *b, void *c) {
 }
 #endif
 
-#if ASAN_INTERCEPT_MLOCKX
-// intercept mlock and friends.
-// Since asan maps 16T of RAM, mlock is completely unfriendly to asan.
-// All functions return 0 (success).
-static void MlockIsUnsupported() {
-  static bool printed = false;
-  if (printed) return;
-  printed = true;
-  VPrintf(1,
-          "INFO: AddressSanitizer ignores "
-          "mlock/mlockall/munlock/munlockall\n");
+#if SANITIZER_WINDOWS
+INTERCEPTOR_WINAPI(void, RaiseException, void *a, void *b, void *c, void *d) {
+  CHECK(REAL(RaiseException));
+  __asan_handle_no_return();
+  REAL(RaiseException)(a, b, c, d);
 }
 
-INTERCEPTOR(int, mlock, const void *addr, uptr len) {
-  MlockIsUnsupported();
-  return 0;
+INTERCEPTOR(int, _except_handler3, void *a, void *b, void *c, void *d) {
+  CHECK(REAL(_except_handler3));
+  __asan_handle_no_return();
+  return REAL(_except_handler3)(a, b, c, d);
 }
 
-INTERCEPTOR(int, munlock, const void *addr, uptr len) {
-  MlockIsUnsupported();
-  return 0;
-}
-
-INTERCEPTOR(int, mlockall, int flags) {
-  MlockIsUnsupported();
-  return 0;
-}
-
-INTERCEPTOR(int, munlockall, void) {
-  MlockIsUnsupported();
-  return 0;
+#if ASAN_DYNAMIC
+// This handler is named differently in -MT and -MD CRTs.
+#define _except_handler4 _except_handler4_common
+#endif
+INTERCEPTOR(int, _except_handler4, void *a, void *b, void *c, void *d) {
+  CHECK(REAL(_except_handler4));
+  __asan_handle_no_return();
+  return REAL(_except_handler4)(a, b, c, d);
 }
 #endif
 
@@ -529,7 +520,7 @@ INTERCEPTOR(char*, strdup, const char *s) {
 }
 #endif
 
-INTERCEPTOR(uptr, strlen, const char *s) {
+INTERCEPTOR(SIZE_T, strlen, const char *s) {
   if (UNLIKELY(!asan_inited)) return internal_strlen(s);
   // strlen is called from malloc_default_purgeable_zone()
   // in __asan::ReplaceSystemAlloc() on Mac.
@@ -537,15 +528,15 @@ INTERCEPTOR(uptr, strlen, const char *s) {
     return REAL(strlen)(s);
   }
   ENSURE_ASAN_INITED();
-  uptr length = REAL(strlen)(s);
+  SIZE_T length = REAL(strlen)(s);
   if (flags()->replace_str) {
     ASAN_READ_RANGE(s, length + 1);
   }
   return length;
 }
 
-INTERCEPTOR(uptr, wcslen, const wchar_t *s) {
-  uptr length = REAL(wcslen)(s);
+INTERCEPTOR(SIZE_T, wcslen, const wchar_t *s) {
+  SIZE_T length = REAL(wcslen)(s);
   if (!asan_init_is_running) {
     ENSURE_ASAN_INITED();
     ASAN_READ_RANGE(s, (length + 1) * sizeof(wchar_t));
@@ -587,7 +578,7 @@ static inline void FixRealStrtolEndptr(const char *nptr, char **endptr) {
     // We get this symbol by skipping leading blanks and optional +/- sign.
     while (IsSpace(*nptr)) nptr++;
     if (*nptr == '+' || *nptr == '-') nptr++;
-    *endptr = (char*)nptr;
+    *endptr = const_cast<char *>(nptr);
   }
   CHECK(*endptr >= nptr);
 }
@@ -728,6 +719,9 @@ INTERCEPTOR_WINAPI(DWORD, CreateThread,
 namespace __asan {
 void InitializeWindowsInterceptors() {
   ASAN_INTERCEPT_FUNC(CreateThread);
+  ASAN_INTERCEPT_FUNC(RaiseException);
+  ASAN_INTERCEPT_FUNC(_except_handler3);
+  ASAN_INTERCEPT_FUNC(_except_handler4);
 }
 
 }  // namespace __asan
@@ -775,14 +769,6 @@ void InitializeAsanInterceptors() {
   ASAN_INTERCEPT_FUNC(strtoll);
 #endif
 
-#if ASAN_INTERCEPT_MLOCKX
-  // Intercept mlock/munlock.
-  ASAN_INTERCEPT_FUNC(mlock);
-  ASAN_INTERCEPT_FUNC(munlock);
-  ASAN_INTERCEPT_FUNC(mlockall);
-  ASAN_INTERCEPT_FUNC(munlockall);
-#endif
-
   // Intecept signal- and jump-related functions.
   ASAN_INTERCEPT_FUNC(longjmp);
 #if ASAN_INTERCEPT_SIGNAL_AND_SIGACTION
@@ -805,7 +791,7 @@ void InitializeAsanInterceptors() {
 
   // Intercept exception handling functions.
 #if ASAN_INTERCEPT___CXA_THROW
-  INTERCEPT_FUNCTION(__cxa_throw);
+  ASAN_INTERCEPT_FUNC(__cxa_throw);
 #endif
 
   // Intercept threading-related functions
