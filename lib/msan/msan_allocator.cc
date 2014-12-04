@@ -40,14 +40,26 @@ struct MsanMapUnmapCallback {
   }
 };
 
-static const uptr kAllocatorSpace = 0x600000000000ULL;
-static const uptr kAllocatorSize   = 0x80000000000;  // 8T.
-static const uptr kMetadataSize  = sizeof(Metadata);
-static const uptr kMaxAllowedMallocSize = 8UL << 30;
+#if defined(__mips64)
+  static const uptr kMaxAllowedMallocSize = 2UL << 30;
+  static const uptr kRegionSizeLog = 20;
+  static const uptr kNumRegions = SANITIZER_MMAP_RANGE_SIZE >> kRegionSizeLog;
+  typedef TwoLevelByteMap<(kNumRegions >> 12), 1 << 12> ByteMap;
+  typedef CompactSizeClassMap SizeClassMap;
 
-typedef SizeClassAllocator64<kAllocatorSpace, kAllocatorSize, kMetadataSize,
+  typedef SizeClassAllocator32<0, SANITIZER_MMAP_RANGE_SIZE, sizeof(Metadata),
+                               SizeClassMap, kRegionSizeLog, ByteMap,
+                               MsanMapUnmapCallback> PrimaryAllocator;
+#elif defined(__x86_64__)
+  static const uptr kAllocatorSpace = 0x600000000000ULL;
+  static const uptr kAllocatorSize   = 0x80000000000;  // 8T.
+  static const uptr kMetadataSize  = sizeof(Metadata);
+  static const uptr kMaxAllowedMallocSize = 8UL << 30;
+
+  typedef SizeClassAllocator64<kAllocatorSpace, kAllocatorSize, kMetadataSize,
                              DefaultSizeClassMap,
                              MsanMapUnmapCallback> PrimaryAllocator;
+#endif
 typedef SizeClassAllocatorLocalCache<PrimaryAllocator> AllocatorCache;
 typedef LargeMmapAllocator<MsanMapUnmapCallback> SecondaryAllocator;
 typedef CombinedAllocator<PrimaryAllocator, AllocatorCache,
@@ -102,7 +114,7 @@ static void *MsanAllocate(StackTrace *stack, uptr size, uptr alignment,
   } else if (flags()->poison_in_malloc) {
     __msan_poison(allocated, size);
     if (__msan_get_track_origins()) {
-      u32 stack_id = StackDepotPut(stack->trace, stack->size);
+      u32 stack_id = StackDepotPut(*stack);
       CHECK(stack_id);
       u32 id;
       ChainedOriginDepotPut(stack_id, Origin::kHeapRoot, &id);
@@ -125,7 +137,7 @@ void MsanDeallocate(StackTrace *stack, void *p) {
   if (flags()->poison_in_free) {
     __msan_poison(p, size);
     if (__msan_get_track_origins()) {
-      u32 stack_id = StackDepotPut(stack->trace, stack->size);
+      u32 stack_id = StackDepotPut(*stack);
       CHECK(stack_id);
       u32 id;
       ChainedOriginDepotPut(stack_id, Origin::kHeapRoot, &id);
@@ -188,40 +200,19 @@ uptr __sanitizer_get_current_allocated_bytes() {
   allocator.GetStats(stats);
   return stats[AllocatorStatAllocated];
 }
-uptr __msan_get_current_allocated_bytes() {
-  return __sanitizer_get_current_allocated_bytes();
-}
 
 uptr __sanitizer_get_heap_size() {
   uptr stats[AllocatorStatCount];
   allocator.GetStats(stats);
   return stats[AllocatorStatMapped];
 }
-uptr __msan_get_heap_size() {
-  return __sanitizer_get_heap_size();
-}
 
 uptr __sanitizer_get_free_bytes() { return 1; }
-uptr __msan_get_free_bytes() {
-  return __sanitizer_get_free_bytes();
-}
 
 uptr __sanitizer_get_unmapped_bytes() { return 1; }
-uptr __msan_get_unmapped_bytes() {
-  return __sanitizer_get_unmapped_bytes();
-}
 
 uptr __sanitizer_get_estimated_allocated_size(uptr size) { return size; }
-uptr __msan_get_estimated_allocated_size(uptr size) {
-  return __sanitizer_get_estimated_allocated_size(size);
-}
 
 int __sanitizer_get_ownership(const void *p) { return AllocationSize(p) != 0; }
-int __msan_get_ownership(const void *p) {
-  return __sanitizer_get_ownership(p);
-}
 
 uptr __sanitizer_get_allocated_size(const void *p) { return AllocationSize(p); }
-uptr __msan_get_allocated_size(const void *p) {
-  return __sanitizer_get_allocated_size(p);
-}
