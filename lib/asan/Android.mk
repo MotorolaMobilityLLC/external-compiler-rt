@@ -32,7 +32,6 @@ asan_rtl_files := \
   asan_malloc_linux.cc \
   asan_malloc_mac.cc \
   asan_malloc_win.cc \
-  asan_new_delete.cc \
   asan_poisoning.cc \
   asan_posix.cc \
   asan_report.cc \
@@ -82,6 +81,9 @@ asan_rtl_files := \
   ../sanitizer_common/sanitizer_tls_get_addr.cc \
   ../sanitizer_common/sanitizer_unwind_posix_libcdep.cc \
   ../sanitizer_common/sanitizer_win.cc \
+
+asan_rtl_cxx_files := \
+	asan_new_delete.cc	\
 
 asan_rtl_cflags := \
 	-fvisibility=hidden \
@@ -143,7 +145,7 @@ LOCAL_C_INCLUDES := \
   external/compiler-rt/lib \
   external/compiler-rt/include
 LOCAL_CFLAGS += $(asan_rtl_cflags)
-LOCAL_SRC_FILES := $(asan_rtl_files)
+LOCAL_SRC_FILES := $(asan_rtl_files) $(asan_rtl_cxx_files)
 LOCAL_CPP_EXTENSION := .cc
 LOCAL_SHARED_LIBRARIES := liblog libc libdl
 LOCAL_STATIC_LIBRARIES := libcompiler_rt
@@ -227,10 +229,10 @@ endif # ifeq($(TARGET_ARCH),arm)
 ifneq ($(HOST_OS),darwin)
 include $(CLEAR_VARS)
 LOCAL_MODULE := libasan
-LOCAL_MODULE_TAGS := optional
+LOCAL_MODULE_TAGS := eng
 LOCAL_C_INCLUDES := external/compiler-rt/lib external/compiler-rt/include
 LOCAL_CFLAGS += $(asan_rtl_cflags)
-LOCAL_SRC_FILES := $(asan_rtl_files) asan_preinit.cc
+LOCAL_SRC_FILES := $(asan_rtl_files)
 LOCAL_CPP_EXTENSION := .cc
 LOCAL_CLANG := true
 LOCAL_MULTILIB := both
@@ -239,18 +241,19 @@ LOCAL_ADDRESS_SANITIZER := false
 include $(BUILD_HOST_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)
-LOCAL_MODULE := asanwrapper
+LOCAL_MODULE := libasan_cxx
 LOCAL_MODULE_TAGS := eng
-LOCAL_SRC_FILES := asanwrapper.cc
+LOCAL_C_INCLUDES := external/compiler-rt/lib external/compiler-rt/include
+LOCAL_CFLAGS += $(asan_rtl_cflags)
+LOCAL_SRC_FILES := $(asan_rtl_cxx_files)
 LOCAL_CPP_EXTENSION := .cc
-LOCAL_CPPFLAGS := -std=c++11
-LOCAL_CXX_STL := libc++
+LOCAL_CLANG := true
 LOCAL_MULTILIB := both
 LOCAL_MODULE_STEM_32 := $(LOCAL_MODULE)32
 LOCAL_MODULE_STEM_64 := $(LOCAL_MODULE)64
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 LOCAL_ADDRESS_SANITIZER := false
-include $(BUILD_HOST_EXECUTABLE)
+include $(BUILD_HOST_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := libasan_noinst_test
