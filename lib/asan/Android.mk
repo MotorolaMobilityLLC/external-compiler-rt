@@ -125,7 +125,9 @@ include $(CLEAR_VARS)
 
 LOCAL_MODULE := libasan
 LOCAL_MODULE_TAGS := optional
-LOCAL_C_INCLUDES := bionic external/compiler-rt/lib external/compiler-rt/include
+LOCAL_C_INCLUDES := \
+    external/compiler-rt/lib \
+    external/compiler-rt/include
 LOCAL_CFLAGS += $(asan_rtl_cflags)
 LOCAL_SRC_FILES := asan_preinit.cc
 #LOCAL_SRC_FILES := asan_android_stub.cc asan_preinit.cc
@@ -141,7 +143,6 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := $(ADDRESS_SANITIZER_RUNTIME_LIBRARY)
 LOCAL_MODULE_TAGS := eng
 LOCAL_C_INCLUDES := \
-  bionic \
   external/compiler-rt/lib \
   external/compiler-rt/include
 LOCAL_CFLAGS += $(asan_rtl_cflags)
@@ -159,8 +160,6 @@ include $(CLEAR_VARS)
 
 LOCAL_MODULE := asanwrapper
 LOCAL_MODULE_TAGS := eng
-LOCAL_C_INCLUDES := \
-        bionic
 LOCAL_SRC_FILES := asanwrapper.cc
 LOCAL_CPP_EXTENSION := .cc
 LOCAL_CPPFLAGS := -std=c++11
