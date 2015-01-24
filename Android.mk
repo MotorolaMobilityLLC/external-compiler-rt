@@ -364,12 +364,25 @@ LOCAL_MULTILIB := both
 include $(BUILD_HOST_STATIC_LIBRARY)
 
 #=====================================================================
+# Host Static Library: libprofile_rt
+#=====================================================================
+
+include $(CLEAR_VARS)
+
+LOCAL_MODULE = libprofile_rt
+LOCAL_SRC_FILES = lib/profile/GCDAProfiling.c
+LOCAL_ADDRESS_SANITIZER := false
+
+include $(BUILD_HOST_STATIC_LIBRARY)
+
+#=====================================================================
 # Device Static Library: libprofile_rt
 #=====================================================================
 
 include $(CLEAR_VARS)
 
 LOCAL_MODULE = libprofile_rt
+LOCAL_CLANG := true
 LOCAL_SRC_FILES = lib/profile/GCDAProfiling.c
 LOCAL_ADDRESS_SANITIZER := false
 
