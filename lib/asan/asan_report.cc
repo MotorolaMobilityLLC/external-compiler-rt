@@ -53,7 +53,7 @@ void AppendToErrorMessageBuffer(const char *buffer) {
                      buffer, remaining);
     error_message_buffer[error_message_buffer_size - 1] = '\0';
     // FIXME: reallocate the buffer instead of truncating the message.
-    error_message_buffer_pos += remaining > length ? length : remaining;
+    error_message_buffer_pos += Min(remaining, length);
   }
 }
 
@@ -87,6 +87,8 @@ class Decorator: public __sanitizer::SanitizerCommonDecorator {
         return Cyan();
       case kAsanUserPoisonedMemoryMagic:
       case kAsanContiguousContainerOOBMagic:
+      case kAsanAllocaLeftMagic:
+      case kAsanAllocaRightMagic:
         return Blue();
       case kAsanStackUseAfterScopeMagic:
         return Magenta();
@@ -173,6 +175,8 @@ static void PrintLegend(InternalScopedString *str) {
   PrintShadowByte(str, "  Intra object redzone:    ",
                   kAsanIntraObjectRedzone);
   PrintShadowByte(str, "  ASan internal:           ", kAsanInternalHeapMagic);
+  PrintShadowByte(str, "  Left alloca redzone:     ", kAsanAllocaLeftMagic);
+  PrintShadowByte(str, "  Right alloca redzone:    ", kAsanAllocaRightMagic);
 }
 
 void MaybeDumpInstructionBytes(uptr pc) {
@@ -643,38 +647,37 @@ class ScopedInErrorReport {
   }
 };
 
-void ReportStackOverflow(uptr pc, uptr sp, uptr bp, void *context, uptr addr) {
+void ReportStackOverflow(const SignalContext &sig) {
   ScopedInErrorReport in_report;
   Decorator d;
   Printf("%s", d.Warning());
   Report(
       "ERROR: AddressSanitizer: stack-overflow on address %p"
       " (pc %p bp %p sp %p T%d)\n",
-      (void *)addr, (void *)pc, (void *)bp, (void *)sp,
+      (void *)sig.addr, (void *)sig.pc, (void *)sig.bp, (void *)sig.sp,
       GetCurrentTidOrInvalid());
   Printf("%s", d.EndWarning());
-  GET_STACK_TRACE_SIGNAL(pc, bp, context);
+  GET_STACK_TRACE_SIGNAL(sig);
   stack.Print();
   ReportErrorSummary("stack-overflow", &stack);
 }
 
-void ReportSIGSEGV(const char *description, uptr pc, uptr sp, uptr bp,
-                   void *context, uptr addr) {
+void ReportSIGSEGV(const char *description, const SignalContext &sig) {
   ScopedInErrorReport in_report;
   Decorator d;
   Printf("%s", d.Warning());
   Report(
       "ERROR: AddressSanitizer: %s on unknown address %p"
       " (pc %p bp %p sp %p T%d)\n",
-      description, (void *)addr, (void *)pc, (void *)bp, (void *)sp,
-      GetCurrentTidOrInvalid());
-  if (pc < GetPageSizeCached()) {
+      description, (void *)sig.addr, (void *)sig.pc, (void *)sig.bp,
+      (void *)sig.sp, GetCurrentTidOrInvalid());
+  if (sig.pc < GetPageSizeCached()) {
     Report("Hint: pc points to the zero page.\n");
   }
   Printf("%s", d.EndWarning());
-  GET_STACK_TRACE_SIGNAL(pc, bp, context);
+  GET_STACK_TRACE_SIGNAL(sig);
   stack.Print();
-  MaybeDumpInstructionBytes(pc);
+  MaybeDumpInstructionBytes(sig.pc);
   Printf("AddressSanitizer can not provide additional info.\n");
   ReportErrorSummary("SEGV", &stack);
 }
@@ -831,6 +834,9 @@ void ReportBadParamsToAnnotateContiguousContainer(uptr beg, uptr end,
          "      old_mid : %p\n"
          "      new_mid : %p\n",
          beg, end, old_mid, new_mid);
+  uptr granularity = SHADOW_GRANULARITY;
+  if (!IsAligned(beg, granularity))
+    Report("ERROR: beg is not aligned by %d\n", granularity);
   stack->Print();
   ReportErrorSummary("bad-__sanitizer_annotate_contiguous_container", stack);
 }
@@ -934,6 +940,8 @@ using namespace __asan;  // NOLINT
 
 void __asan_report_error(uptr pc, uptr bp, uptr sp, uptr addr, int is_write,
                          uptr access_size) {
+  ENABLE_FRAME_POINTER;
+
   // Determine the error type.
   const char *bug_descr = "unknown-crash";
   if (AddrIsInMem(addr)) {
@@ -981,6 +989,10 @@ void __asan_report_error(uptr pc, uptr bp, uptr sp, uptr addr, int is_write,
         break;
       case kAsanIntraObjectRedzone:
         bug_descr = "intra-object-overflow";
+        break;
+      case kAsanAllocaLeftMagic:
+      case kAsanAllocaRightMagic:
+        bug_descr = "dynamic-stack-buffer-overflow";
         break;
     }
   }
