@@ -23,8 +23,9 @@ ASAN_FLEXIBLE_MAPPING_AND_OFFSET=0
 
 asan_rtl_files := \
   asan_activation.cc \
-  asan_allocator2.cc \
+  asan_allocator.cc \
   asan_fake_stack.cc \
+  asan_flags.cc \
   asan_globals.cc \
   asan_interceptors.cc \
   asan_linux.cc \
@@ -38,6 +39,7 @@ asan_rtl_files := \
   asan_rtl.cc \
   asan_stack.cc \
   asan_stats.cc \
+  asan_suppressions.cc \
   asan_thread.cc \
   asan_win.cc \
   ../interception/interception_linux.cc \
@@ -51,6 +53,7 @@ asan_rtl_files := \
   ../sanitizer_common/sanitizer_deadlock_detector1.cc \
   ../sanitizer_common/sanitizer_deadlock_detector2.cc \
   ../sanitizer_common/sanitizer_flags.cc \
+  ../sanitizer_common/sanitizer_flag_parser.cc \
   ../sanitizer_common/sanitizer_libc.cc \
   ../sanitizer_common/sanitizer_libignore.cc \
   ../sanitizer_common/sanitizer_linux.cc \
@@ -182,6 +185,7 @@ LOCAL_C_INCLUDES := \
     external/compiler-rt/lib/asan/tests \
     external/compiler-rt/lib/sanitizer_common/tests
 LOCAL_CFLAGS += \
+    -Wno-non-virtual-dtor \
     -Wno-unused-parameter \
     -Wno-sign-compare \
     -DASAN_UAR=0 \
