@@ -322,6 +322,20 @@ LOCAL_ADDRESS_SANITIZER := false
 
 include $(BUILD_STATIC_LIBRARY)
 
+#=====================================================================
+# Host Static Library: libcompiler_rt-extras
+#=====================================================================
+
+include $(CLEAR_VARS)
+
+LOCAL_MODULE := libcompiler_rt-extras
+LOCAL_CLANG := true
+LOCAL_SRC_FILES := $(libcompiler_rt_extras_SRC_FILES)
+LOCAL_ADDRESS_SANITIZER := false
+LOCAL_MULTILIB := both
+
+include $(BUILD_HOST_STATIC_LIBRARY)
+
 # Don't build compiler-rt without clang
 ifneq ($(WITHOUT_TARGET_CLANG), true)
 
