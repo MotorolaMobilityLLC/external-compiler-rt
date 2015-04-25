@@ -150,7 +150,6 @@ LOCAL_C_INCLUDES := \
   external/compiler-rt/lib \
   external/compiler-rt/include
 LOCAL_CFLAGS += $(asan_rtl_cflags)
-LOCAL_LDFLAGS += -Wl,-z,global
 LOCAL_SRC_FILES := $(asan_rtl_files) $(asan_rtl_cxx_files)
 LOCAL_CPP_EXTENSION := .cc
 LOCAL_SHARED_LIBRARIES := liblog libc libdl
