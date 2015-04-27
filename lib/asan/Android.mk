@@ -142,10 +142,11 @@ LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 LOCAL_ADDRESS_SANITIZER := false
 include $(BUILD_STATIC_LIBRARY)
 
+define build-asan-rt-shared-library
 
 include $(CLEAR_VARS)
-
-LOCAL_MODULE := $(ADDRESS_SANITIZER_RUNTIME_LIBRARY)
+LOCAL_MODULE := $(1)
+LOCAL_MULTILIB := $(2)
 LOCAL_MODULE_TAGS := eng
 LOCAL_C_INCLUDES := \
   external/compiler-rt/lib \
@@ -160,6 +161,14 @@ LOCAL_ADDRESS_SANITIZER := false
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include $(BUILD_SHARED_LIBRARY)
 
+endef
+
+ifdef 2ND_ADDRESS_SANITIZER_RUNTIME_LIBRARY
+  $(eval $(call build-asan-rt-shared-library,$(ADDRESS_SANITIZER_RUNTIME_LIBRARY),64))
+  $(eval $(call build-asan-rt-shared-library,$(2ND_ADDRESS_SANITIZER_RUNTIME_LIBRARY),32))
+else
+  $(eval $(call build-asan-rt-shared-library,$(ADDRESS_SANITIZER_RUNTIME_LIBRARY),32))
+endif
 
 include $(CLEAR_VARS)
 
