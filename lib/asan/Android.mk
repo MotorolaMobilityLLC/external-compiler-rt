@@ -129,7 +129,6 @@ ifeq ($(TARGET_ARCH),arm)
 include $(CLEAR_VARS)
 
 LOCAL_MODULE := libasan
-LOCAL_MODULE_TAGS := optional
 LOCAL_C_INCLUDES := \
     external/compiler-rt/lib \
     external/compiler-rt/include
@@ -147,7 +146,6 @@ define build-asan-rt-shared-library
 include $(CLEAR_VARS)
 LOCAL_MODULE := $(1)
 LOCAL_MULTILIB := $(2)
-LOCAL_MODULE_TAGS := eng
 LOCAL_C_INCLUDES := \
   external/compiler-rt/lib \
   external/compiler-rt/include
@@ -178,7 +176,6 @@ endif
 include $(CLEAR_VARS)
 
 LOCAL_MODULE := asanwrapper
-LOCAL_MODULE_TAGS := eng
 LOCAL_SRC_FILES := asanwrapper.cc
 LOCAL_CPP_EXTENSION := .cc
 LOCAL_CPPFLAGS := -std=c++11
@@ -248,7 +245,6 @@ endif # ifeq($(TARGET_ARCH),arm)
 ifneq ($(HOST_OS),darwin)
 include $(CLEAR_VARS)
 LOCAL_MODULE := libasan
-LOCAL_MODULE_TAGS := eng
 LOCAL_C_INCLUDES := external/compiler-rt/lib external/compiler-rt/include
 LOCAL_CFLAGS += $(asan_rtl_cflags)
 LOCAL_SRC_FILES := $(asan_rtl_files)
@@ -262,7 +258,6 @@ include $(BUILD_HOST_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := libasan_cxx
-LOCAL_MODULE_TAGS := eng
 LOCAL_C_INCLUDES := external/compiler-rt/lib external/compiler-rt/include
 LOCAL_CFLAGS += $(asan_rtl_cflags)
 LOCAL_SRC_FILES := $(asan_rtl_cxx_files)
