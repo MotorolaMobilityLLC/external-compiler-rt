@@ -146,6 +146,9 @@ define build-asan-rt-shared-library
 include $(CLEAR_VARS)
 LOCAL_MODULE := $(1)
 LOCAL_MULTILIB := $(2)
+# We need to unwind by frame pointers through a small portion of ASan runtime library code,
+# and that only works with ARM, not with Thumb.
+LOCAL_ARM_MODE := arm
 LOCAL_C_INCLUDES := \
   external/compiler-rt/lib \
   external/compiler-rt/include
