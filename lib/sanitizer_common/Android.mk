@@ -72,6 +72,9 @@ san_rtl_cppflags := \
 san_rtl_c_includes := \
     external/compiler-rt/lib \
 
+################################################################################
+# Host modules
+
 ifneq ($(HOST_OS),darwin)
 
 include $(CLEAR_VARS)
