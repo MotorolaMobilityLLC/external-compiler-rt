@@ -40,7 +40,39 @@ ubsan_rtl_cppflags := \
 ubsan_rtl_c_includes := \
     external/compiler-rt/lib \
 
+################################################################################
+# Target modules
+
+ifeq ($(TARGET_ARCH),arm)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE := libubsan
+LOCAL_CPP_EXTENSION := .cc
+LOCAL_C_INCLUDES := $(ubsan_rtl_c_includes)
+LOCAL_CPPFLAGS := $(ubsan_rtl_cppflags)
+LOCAL_SRC_FILES := $(ubsan_rtl_files)
+LOCAL_CXX_STL := none
+LOCAL_ADDRESS_SANITIZER := false
+LOCAL_MULTILIB := both
+include $(BUILD_STATIC_LIBRARY)
+
+endif # ($(TARGET_ARCH),arm)
+
+################################################################################
+# Host modules
+
 ifneq ($(HOST_OS),darwin)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE := libubsan
+LOCAL_CPP_EXTENSION := .cc
+LOCAL_C_INCLUDES := $(ubsan_rtl_c_includes)
+LOCAL_CPPFLAGS := $(ubsan_rtl_cppflags) -fno-rtti
+LOCAL_SRC_FILES := $(ubsan_rtl_files)
+LOCAL_CXX_STL := none
+LOCAL_ADDRESS_SANITIZER := false
+LOCAL_MULTILIB := both
+include $(BUILD_HOST_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := libubsan_standalone
