@@ -156,7 +156,7 @@ LOCAL_CFLAGS += $(asan_rtl_cflags)
 LOCAL_SRC_FILES := $(asan_rtl_files) $(asan_rtl_cxx_files)
 LOCAL_CPP_EXTENSION := .cc
 LOCAL_SHARED_LIBRARIES := liblog libc libdl
-LOCAL_STATIC_LIBRARIES := libcompiler_rt
+LOCAL_STATIC_LIBRARIES := libcompiler_rt libubsan
 # MacOS toolchain is out-of-date and does not support -z global.
 # TODO: re-enable once the toolchain issue is fixed.
 ifneq ($(HOST_OS),darwin)
@@ -256,6 +256,7 @@ LOCAL_CLANG := true
 LOCAL_MULTILIB := both
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 LOCAL_ADDRESS_SANITIZER := false
+LOCAL_WHOLE_STATIC_LIBRARIES := libubsan
 include $(BUILD_HOST_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)
