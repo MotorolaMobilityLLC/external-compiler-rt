@@ -102,6 +102,7 @@ asan_rtl_cflags := \
 	-Wno-unused-parameter \
 	-std=c++11 \
 	-fno-rtti \
+	-fno-builtin
 
 asan_test_files := \
 	tests/asan_globals_test.cc \
