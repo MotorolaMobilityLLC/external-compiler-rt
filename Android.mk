@@ -61,6 +61,7 @@ libcompiler_rt_common_SRC_FILES := \
   lib/builtins/divxc3.c \
   lib/builtins/eprintf.c \
   lib/builtins/extenddftf2.c \
+  lib/builtins/extendhfsf2.c \
   lib/builtins/extendsfdf2.c \
   lib/builtins/extendsftf2.c \
   lib/builtins/ffsdi2.c \
@@ -145,7 +146,9 @@ libcompiler_rt_common_SRC_FILES := \
   lib/builtins/subvsi3.c \
   lib/builtins/subvti3.c \
   lib/builtins/trampoline_setup.c \
+  lib/builtins/truncdfhf2.c \
   lib/builtins/truncdfsf2.c \
+  lib/builtins/truncsfhf2.c \
   lib/builtins/trunctfdf2.c \
   lib/builtins/trunctfsf2.c \
   lib/builtins/ucmpdi2.c \
