@@ -422,7 +422,8 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := libcompiler_rt
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 LOCAL_WHOLE_STATIC_LIBRARIES := libcompiler_rt
-LOCAL_SHARED_LIBRARIES := libdl
+LOCAL_SHARED_LIBRARIES := libdl liblog
+LOCAL_STATIC_LIBRARIES := liblzma
 LOCAL_STATIC_LIBRARIES_arm := libunwind_llvm
 LOCAL_STATIC_LIBRARIES_arm64 := libunwindbacktrace
 LOCAL_STATIC_LIBRARIES_mips := libunwindbacktrace
