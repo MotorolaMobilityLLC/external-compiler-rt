@@ -165,6 +165,7 @@ ifneq ($(HOST_OS),darwin)
 endif
 LOCAL_CLANG := true
 LOCAL_ADDRESS_SANITIZER := false
+LOCAL_CXX_STL := none
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include $(BUILD_SHARED_LIBRARY)
 
