@@ -84,7 +84,7 @@ LOCAL_C_INCLUDES := $(san_rtl_c_includes)
 LOCAL_CPPFLAGS := $(san_rtl_cppflags)
 LOCAL_SRC_FILES := $(san_rtl_files) $(san_cdep_files)
 LOCAL_CXX_STL := none
-LOCAL_ADDRESS_SANITIZER := false
+LOCAL_SANITIZE := never
 LOCAL_MULTILIB := both
 include $(BUILD_HOST_STATIC_LIBRARY)
 
