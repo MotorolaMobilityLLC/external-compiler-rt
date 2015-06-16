@@ -66,7 +66,7 @@ LOCAL_CPPFLAGS := $(san_test_cppflags)
 LOCAL_SRC_FILES := $(san_test_files)
 LOCAL_STATIC_LIBRARIES := libsan
 LOCAL_LDLIBS := -ldl
-LOCAL_ADDRESS_SANITIZER := false
+LOCAL_SANITIZE := never
 include $(BUILD_HOST_NATIVE_TEST)
 
 include $(CLEAR_VARS)
@@ -78,7 +78,7 @@ LOCAL_SRC_FILES := sanitizer_nolibc_test_main.cc
 LOCAL_STATIC_LIBRARIES := libsan libgtest_host
 LOCAL_LDFLAGS := -nostdlib -Qunused-arguments
 LOCAL_LDLIBS := -ldl
-LOCAL_ADDRESS_SANITIZER := false
+LOCAL_SANITIZE := never
 include $(BUILD_HOST_EXECUTABLE)
 
 endif
