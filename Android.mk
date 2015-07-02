@@ -51,12 +51,12 @@ libcompiler_rt_common_SRC_FILES := \
   lib/builtins/divdc3.c \
   lib/builtins/divdf3.c \
   lib/builtins/divdi3.c \
-  lib/builtins/divtf3.c \
   lib/builtins/divmoddi4.c \
   lib/builtins/divmodsi4.c \
   lib/builtins/divsc3.c \
   lib/builtins/divsf3.c \
   lib/builtins/divsi3.c \
+  lib/builtins/divtf3.c \
   lib/builtins/divti3.c \
   lib/builtins/divxc3.c \
   lib/builtins/eprintf.c \
@@ -72,12 +72,18 @@ libcompiler_rt_common_SRC_FILES := \
   lib/builtins/fixsfdi.c \
   lib/builtins/fixsfsi.c \
   lib/builtins/fixsfti.c \
+  lib/builtins/fixtfdi.c \
+  lib/builtins/fixtfsi.c \
+  lib/builtins/fixtfti.c \
   lib/builtins/fixunsdfdi.c \
   lib/builtins/fixunsdfsi.c \
   lib/builtins/fixunsdfti.c \
   lib/builtins/fixunssfdi.c \
   lib/builtins/fixunssfsi.c \
   lib/builtins/fixunssfti.c \
+  lib/builtins/fixunstfdi.c \
+  lib/builtins/fixunstfsi.c \
+  lib/builtins/fixunstfti.c \
   lib/builtins/fixunsxfdi.c \
   lib/builtins/fixunsxfsi.c \
   lib/builtins/fixunsxfti.c \
