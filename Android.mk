@@ -358,6 +358,7 @@ include $(CLEAR_VARS)
 
 LOCAL_MODULE := libcompiler_rt
 LOCAL_CFLAGS_arm += -D__ARM_EABI__
+LOCAL_CFLAGS_mips64 += -DCRT_HAS_128BIT -DCRT_LDBL_128BIT
 LOCAL_ASFLAGS := -integrated-as
 LOCAL_CLANG := true
 LOCAL_SRC_FILES_arm := $(call get-libcompiler-rt-source-files,arm)
@@ -366,6 +367,7 @@ LOCAL_SRC_FILES_mips := $(call get-libcompiler-rt-source-files,mips)
 LOCAL_SRC_FILES_mips64 := $(call get-libcompiler-rt-source-files,mips64)
 LOCAL_SRC_FILES_x86 := $(call get-libcompiler-rt-source-files,x86)
 LOCAL_SRC_FILES_x86_64 := $(call get-libcompiler-rt-source-files,x86_64)
+LOCAL_SRC_FILES_x86_64 += lib/builtins/ppc/floatditf.c
 LOCAL_MODULE_TARGET_ARCH := arm arm64 mips mips64 x86 x86_64
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 LOCAL_ADDRESS_SANITIZER := false
