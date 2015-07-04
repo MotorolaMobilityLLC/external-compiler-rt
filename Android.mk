@@ -439,6 +439,7 @@ LOCAL_STATIC_LIBRARIES_x86_64 := libunwindbacktrace
 LOCAL_MODULE_TARGET_ARCH := arm arm64 mips mips64 x86 x86_64
 LOCAL_SANITIZE := never
 LOCAL_CXX_STL := none
+LOCAL_NO_LIBGCC := true
 
 include $(BUILD_SHARED_LIBRARY)
 
@@ -462,6 +463,7 @@ endif
 LOCAL_MULTILIB := both
 LOCAL_SANITIZE := never
 LOCAL_CXX_STL := none
+LOCAL_NO_LIBGCC := true
 
 include $(BUILD_HOST_SHARED_LIBRARY)
 
