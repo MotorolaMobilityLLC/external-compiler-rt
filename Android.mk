@@ -194,7 +194,42 @@ libcompiler_rt_arm_SRC_FILES := \
   lib/builtins/arm/modsi3.S \
   lib/builtins/arm/udivmodsi4.S \
   lib/builtins/arm/udivsi3.S \
-  lib/builtins/arm/umodsi3.S
+  lib/builtins/arm/umodsi3.S \
+  lib/builtins/arm/adddf3vfp.S \
+  lib/builtins/arm/addsf3vfp.S \
+  lib/builtins/arm/divdf3vfp.S \
+  lib/builtins/arm/divsf3vfp.S \
+  lib/builtins/arm/eqdf2vfp.S \
+  lib/builtins/arm/eqsf2vfp.S \
+  lib/builtins/arm/extendsfdf2vfp.S \
+  lib/builtins/arm/fixdfsivfp.S \
+  lib/builtins/arm/fixsfsivfp.S \
+  lib/builtins/arm/fixunsdfsivfp.S \
+  lib/builtins/arm/fixunssfsivfp.S \
+  lib/builtins/arm/floatsidfvfp.S \
+  lib/builtins/arm/floatsisfvfp.S \
+  lib/builtins/arm/floatunssidfvfp.S \
+  lib/builtins/arm/floatunssisfvfp.S \
+  lib/builtins/arm/gedf2vfp.S \
+  lib/builtins/arm/gesf2vfp.S \
+  lib/builtins/arm/gtdf2vfp.S \
+  lib/builtins/arm/gtsf2vfp.S \
+  lib/builtins/arm/ledf2vfp.S \
+  lib/builtins/arm/lesf2vfp.S \
+  lib/builtins/arm/ltdf2vfp.S \
+  lib/builtins/arm/ltsf2vfp.S \
+  lib/builtins/arm/muldf3vfp.S \
+  lib/builtins/arm/mulsf3vfp.S \
+  lib/builtins/arm/nedf2vfp.S \
+  lib/builtins/arm/negdf2vfp.S \
+  lib/builtins/arm/negsf2vfp.S \
+  lib/builtins/arm/nesf2vfp.S \
+  lib/builtins/arm/subdf3vfp.S \
+  lib/builtins/arm/subsf3vfp.S \
+  lib/builtins/arm/truncdfsf2vfp.S \
+  lib/builtins/arm/unorddf2vfp.S \
+  lib/builtins/arm/unordsf2vfp.S
+
 
 # ARM64-specific runtimes
 libcompiler_rt_arm64_SRC_FILES :=
@@ -275,7 +310,7 @@ define add-libcompiler-rt-arm-vfp-source-files
                                          fixdfsi.c fixsfsi.c fixunsdfsi.c fixunssfsi.c       \
                                          floatsidf.c floatsisf.c floatunsidf.c floatunsisf.c \
                                          muldf3.c mulsf3.c negdf2.c negsf2.c subdf3.c        \
-                                         subsf3.c truncdfsf2.c),$(1)) lib/builtins/arm/vfp_alias.S
+                                         subsf3.c truncdfsf2.c),$(1))
 endef
 
 define get-libcompiler-rt-arm-source-files
