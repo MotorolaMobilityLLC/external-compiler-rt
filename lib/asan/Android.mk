@@ -147,6 +147,11 @@ define build-asan-rt-shared-library
 include $(CLEAR_VARS)
 LOCAL_MODULE := $(1)
 LOCAL_MULTILIB := $(2)
+# This library must go on /system partition, even in SANITIZE_TARGET mode (when all libraries are
+# installed on /data). That's because /data may not be available until vold does some magic and
+# vold itself depends on this library.
+LOCAL_MODULE_PATH_32 := $(TARGET_OUT)/lib
+LOCAL_MODULE_PATH_64 := $(TARGET_OUT)/lib64
 # We need to unwind by frame pointers through a small portion of ASan runtime library code,
 # and that only works with ARM, not with Thumb.
 LOCAL_ARM_MODE := arm
