@@ -295,29 +295,10 @@ define filter-libcompiler-rt-common-source-files
                           $(filter lib/builtins/$(strip $(2))/%.c,$(1))),$(1))
 endef
 
-define get-libcompiler-rt-arm-common-source-files
+define get-libcompiler-rt-arm-source-files
   $(call filter-libcompiler-rt-common-source-files,
       $(libcompiler_rt_common_SRC_FILES) \
       $(libcompiler_rt_arm_SRC_FILES), arm)
-endef
-
-# $(1): common runtime list
-#
-# Add ARM runtimes implemented in VFP
-define add-libcompiler-rt-arm-vfp-source-files
-  $(filter-out $(addprefix lib/builtins/,adddf3.c addsf3.c comparedf2.c comparesf2.c         \
-                                         arm/comparesf2.S divdf3.c divsf3.c extendsfdf2.c    \
-                                         fixdfsi.c fixsfsi.c fixunsdfsi.c fixunssfsi.c       \
-                                         floatsidf.c floatsisf.c floatunsidf.c floatunsisf.c \
-                                         muldf3.c mulsf3.c negdf2.c negsf2.c subdf3.c        \
-                                         subsf3.c truncdfsf2.c),$(1))
-endef
-
-define get-libcompiler-rt-arm-source-files
-  $(if $(findstring $(ARCH_ARM_HAVE_VFP),true),
-      $(call add-libcompiler-rt-arm-vfp-source-files,
-          $(call get-libcompiler-rt-arm-common-source-files)),
-      $(call get-libcompiler-rt-arm-common-source-files))
 endef
 
 define get-libcompiler-rt-arm64-source-files
