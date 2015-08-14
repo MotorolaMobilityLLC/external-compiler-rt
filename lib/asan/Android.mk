@@ -198,6 +198,7 @@ LOCAL_CXX_STL := libc++
 
 include $(BUILD_EXECUTABLE)
 
+ifneq (true,$(SKIP_LLVM_TESTS))
 
 include $(CLEAR_VARS)
 
@@ -249,6 +250,8 @@ LOCAL_CXX_STL := libc++
 
 include $(BUILD_EXECUTABLE)
 
+endif # SKIP_LLVM_TESTS
+
 endif # ifeq($(TARGET_ARCH),arm)
 
 ################################################################################
@@ -279,6 +282,8 @@ LOCAL_MULTILIB := both
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 LOCAL_SANITIZE := never
 include $(BUILD_HOST_STATIC_LIBRARY)
+
+ifneq (true,$(SKIP_LLVM_TESTS))
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := libasan_noinst_test
@@ -326,4 +331,5 @@ LOCAL_MODULE_STEM_32 := $(LOCAL_MODULE)32
 LOCAL_MODULE_STEM_64 := $(LOCAL_MODULE)64
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include $(BUILD_HOST_NATIVE_TEST)
+endif # SKIP_LLVM_TESTS
 endif
