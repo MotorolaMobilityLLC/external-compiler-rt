@@ -124,6 +124,8 @@ tsan_unit_test_c_includes := \
   $(LOCAL_PATH)/rtl \
   $(LOCAL_PATH)/.. \
 
+ifneq (true,$(SKIP_LLVM_TESTS))
+
 include $(CLEAR_VARS)
 LOCAL_MODULE := libtsan_unit_test
 LOCAL_CPP_EXTENSION := .cc
@@ -132,8 +134,8 @@ LOCAL_CPPFLAGS := $(tsan_rtl_cppflags)
 LOCAL_SRC_FILES := $(tsan_unit_test_src_files)
 LOCAL_SANITIZE := never
 LOCAL_MULTILIB := 64
-LOCAL_STATIC_LIBRARIES := libtsan
-LOCAL_LDLIBS := -ldl
+LOCAL_STATIC_LIBRARIES := libtsan libubsan
+LOCAL_LDLIBS := -lrt -ldl
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include $(BUILD_HOST_NATIVE_TEST)
 
@@ -160,10 +162,12 @@ LOCAL_CPPFLAGS := $(tsan_rtl_cppflags)
 LOCAL_SRC_FILES := $(tsan_rtl_test_src_files)
 LOCAL_SANITIZE := never
 LOCAL_MULTILIB := 64
-LOCAL_STATIC_LIBRARIES := libtsan
-LOCAL_LDLIBS := -ldl
+LOCAL_STATIC_LIBRARIES := libtsan libubsan
+LOCAL_LDLIBS := -lrt -ldl
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include $(BUILD_HOST_NATIVE_TEST)
+
+endif # SKIP_LLVM_TESTS
 
 endif  # ifeq ($(HOST_ARCH),x86_64)
 endif  # ifeq ($(HOST_OS),linux)

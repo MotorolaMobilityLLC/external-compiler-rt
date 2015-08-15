@@ -65,7 +65,7 @@ LOCAL_C_INCLUDES := $(san_test_c_includes)
 LOCAL_CPPFLAGS := $(san_test_cppflags)
 LOCAL_SRC_FILES := $(san_test_files)
 LOCAL_STATIC_LIBRARIES := libsan
-LOCAL_LDLIBS := -ldl
+LOCAL_LDLIBS := -ldl -lrt
 LOCAL_SANITIZE := never
 include $(BUILD_HOST_NATIVE_TEST)
 
