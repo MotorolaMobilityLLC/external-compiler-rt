@@ -125,6 +125,7 @@ tsan_unit_test_c_includes := \
   $(LOCAL_PATH)/.. \
 
 ifneq (true,$(SKIP_LLVM_TESTS))
+ifndef SANITIZE_HOST
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := libtsan_unit_test
@@ -167,6 +168,7 @@ LOCAL_LDLIBS := -lrt -ldl
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include $(BUILD_HOST_NATIVE_TEST)
 
+endif # SANITIZE_HOST
 endif # SKIP_LLVM_TESTS
 
 endif  # ifeq ($(HOST_ARCH),x86_64)
