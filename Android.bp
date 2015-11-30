@@ -29,6 +29,12 @@ cc_library_static {
     srcs: ["lib/builtins/mulodi4.c"],
     sanitize: ["never"],
     stl: "none",
+
+    target: {
+        windows: {
+            enabled: true,
+        },
+    },
 }
 
 // Don't build compiler-rt without clang
