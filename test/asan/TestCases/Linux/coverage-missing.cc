@@ -1,21 +1,19 @@
 // Test for "sancov.py missing ...".
 
-// RUN: env ASAN_OPTIONS=$ASAN_OPTIONS:coverage=1:coverage_dir=%T/coverage-missing
-
 // First case: coverage from executable. main() is called on every code path.
 // RUN: %clangxx_asan -fsanitize-coverage=func %s -o %t -DFOOBAR -DMAIN
 // RUN: rm -rf %T/coverage-missing
 // RUN: mkdir -p %T/coverage-missing
 // RUN: cd %T/coverage-missing
-// RUN: env ASAN_OPTIONS=$ASAN_OPTIONS %t
+// RUN: %env_asan_opts=coverage=1:coverage_dir=%T/coverage-missing %run %t
 // RUN: %sancov print *.sancov > main.txt
 // RUN: rm *.sancov
 // RUN: [ $(cat main.txt | wc -l) == 1 ]
-// RUN: env ASAN_OPTIONS=$ASAN_OPTIONS %t x
+// RUN: %env_asan_opts=coverage=1:coverage_dir=%T/coverage-missing %run %t x
 // RUN: %sancov print *.sancov > foo.txt
 // RUN: rm *.sancov
 // RUN: [ $(cat foo.txt | wc -l) == 3 ]
-// RUN: env ASAN_OPTIONS=$ASAN_OPTIONS %t x x
+// RUN: %env_asan_opts=coverage=1:coverage_dir=%T/coverage-missing %run %t x x
 // RUN: %sancov print *.sancov > bar.txt
 // RUN: rm *.sancov
 // RUN: [ $(cat bar.txt | wc -l) == 4 ]
@@ -30,15 +28,15 @@
 // cd %T
 // RUN: %clangxx_asan -fsanitize-coverage=func %s -o %dynamiclib -DFOOBAR -shared -fPIC
 // RUN: %clangxx_asan -fsanitize-coverage=func %s %dynamiclib -o %t -DMAIN
-// RUN: env LIBNAME=`basename %dynamiclib`
+// RUN: export LIBNAME=`basename %dynamiclib`
 // RUN: rm -rf %T/coverage-missing
 // RUN: mkdir -p %T/coverage-missing
 // RUN: cd %T/coverage-missing
-// RUN: env ASAN_OPTIONS=$ASAN_OPTIONS %t x
+// RUN: %env_asan_opts=coverage=1:coverage_dir=%T/coverage-missing %run %t x
 // RUN: %sancov print $LIBNAME.*.sancov > foo.txt
 // RUN: rm *.sancov
 // RUN: [ $(cat foo.txt | wc -l) == 2 ]
-// RUN: env ASAN_OPTIONS=$ASAN_OPTIONS %t x x
+// RUN: %env_asan_opts=coverage=1:coverage_dir=%T/coverage-missing %run %t x x
 // RUN: %sancov print $LIBNAME.*.sancov > bar.txt
 // RUN: rm *.sancov
 // RUN: [ $(cat bar.txt | wc -l) == 3 ]
