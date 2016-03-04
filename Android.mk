@@ -387,6 +387,14 @@ LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 LOCAL_SANITIZE := never
 LOCAL_CXX_STL := none
 
+# These don't actually link, but are required to get exported headers
+LOCAL_STATIC_LIBRARIES_arm := libunwind_llvm
+LOCAL_STATIC_LIBRARIES_arm64 := libunwindbacktrace
+LOCAL_STATIC_LIBRARIES_mips := libunwindbacktrace
+LOCAL_STATIC_LIBRARIES_mips64 := libunwindbacktrace
+LOCAL_STATIC_LIBRARIES_x86 := libunwindbacktrace
+LOCAL_STATIC_LIBRARIES_x86_64 := libunwindbacktrace
+
 include $(BUILD_STATIC_LIBRARY)
 
 #=====================================================================
@@ -406,6 +414,10 @@ LOCAL_SANITIZE := never
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 LOCAL_MULTILIB := both
 LOCAL_CXX_STL := none
+
+# These don't actually link, but are required to get exported headers
+LOCAL_STATIC_LIBRARIES_linux := libunwindbacktrace
+LOCAL_STATIC_LIBRARIES_windows := libunwindbacktrace
 
 include $(BUILD_HOST_STATIC_LIBRARY)
 
