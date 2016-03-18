@@ -378,7 +378,7 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := libcompiler_rt
 LOCAL_CFLAGS := $(libcompiler_rt_common_CFLAGS)
 LOCAL_CFLAGS_arm += -D__ARM_EABI__
-LOCAL_CFLAGS_mips64 += -DCRT_HAS_128BIT -DCRT_LDBL_128BIT
+LOCAL_CFLAGS_mips64 += -DCRT_HAS_128BIT
 LOCAL_ASFLAGS := -integrated-as
 LOCAL_CLANG := true
 LOCAL_SRC_FILES := lib/builtins/enable_execute_stack.c
