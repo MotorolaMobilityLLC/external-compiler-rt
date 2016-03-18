@@ -395,7 +395,6 @@ LOCAL_SANITIZE := never
 LOCAL_CXX_STL := none
 
 # These don't actually link, but are required to get exported headers
-LOCAL_STATIC_LIBRARIES_arm := libunwind_llvm
 LOCAL_STATIC_LIBRARIES_arm64 := libunwindbacktrace
 LOCAL_STATIC_LIBRARIES_mips := libunwindbacktrace
 LOCAL_STATIC_LIBRARIES_mips64 := libunwindbacktrace
