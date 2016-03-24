@@ -30,6 +30,20 @@ cc_library_static {
     sanitize: ["never"],
     stl: "none",
 
+    cflags: [
+        "-Wno-unused-parameter",
+        "-Werror",
+    ],
+
+    arch: {
+        mips: {
+            srcs: ["lib/builtins/clear_cache.c"],
+        },
+        mips64: {
+            srcs: ["lib/builtins/clear_cache.c"],
+        },
+    },
+
     target: {
         windows: {
             enabled: true,
@@ -199,6 +213,11 @@ cc_library {
         "lib/builtins/umodti3.c",
     ],
 
+    cflags: [
+        "-Wno-unused-parameter",
+        "-Werror",
+    ],
+
     arch: {
         arm: {
             cflags: ["-D__ARM_EABI__"],
@@ -269,7 +288,6 @@ cc_library {
         mips64: {
             cflags: [
                 "-DCRT_HAS_128BIT",
-                "-DCRT_LDBL_128BIT",
             ],
         },
         x86: {
@@ -374,6 +392,9 @@ cc_library {
         linux: {
             static_libs: ["libunwindbacktrace"],
         },
+        windows: {
+            static_libs: ["libunwindbacktrace"],
+        },
     },
 
     asflags: ["-integrated-as"],
@@ -382,19 +403,6 @@ cc_library {
 
     sanitize: ["never"],
     stl: "none",
-}
-
-//=====================================================================
-// Host and device Static Library: libprofile_rt
-//=====================================================================
-
-cc_library_static {
-    name: "libprofile_rt",
-    host_supported: true,
-    clang: true,
-    sanitize: ["never"],
-    srcs: ["lib/profile/GCDAProfiling.c"],
-
 }
 
 // Build asan, lsan, etc.
