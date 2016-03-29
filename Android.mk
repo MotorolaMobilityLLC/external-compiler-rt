@@ -357,7 +357,6 @@ include $(CLEAR_VARS)
 
 LOCAL_MODULE := libcompiler_rt-extras
 LOCAL_CFLAGS := $(libcompiler_rt_common_CFLAGS)
-LOCAL_CLANG := true
 LOCAL_SRC_FILES := $(libcompiler_rt_extras_SRC_FILES)
 LOCAL_SANITIZE := never
 LOCAL_MULTILIB := both
