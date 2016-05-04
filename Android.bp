@@ -53,9 +53,6 @@ cc_library_static {
     },
 }
 
-// Don't build compiler-rt without clang
-// ANDROIDMK TRANSLATION ERROR: unsupported directive
-// ifneq ($(WITHOUT_TARGET_CLANG), true)
 //=====================================================================
 // Device and Host Static Library: libcompiler_rt
 //=====================================================================
@@ -409,8 +406,30 @@ cc_library {
     stl: "none",
 }
 
-// Build asan, lsan, etc.
-// ANDROIDMK TRANSLATION ERROR: unsupported include
-// include $(call all-makefiles-under,$(LOCAL_PATH)/lib)
-// ANDROIDMK TRANSLATION ERROR: unsupported directive
-// endif
+cc_defaults {
+    name: "asan_arch_defaults",
+
+    enabled: false,
+    target: {
+        android_arm: {
+            enabled: true,
+        },
+        android_arm64: {
+            enabled: true,
+        },
+        android_x86: {
+            enabled: true,
+        },
+        linux: {
+            enabled: true,
+        },
+    },
+}
+
+subdirs=[
+    "lib/asan",
+    //"lib/interception",
+    "lib/sanitizer_common",
+    //"lib/tsan",
+    "lib/ubsan",
+]
