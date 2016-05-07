@@ -412,7 +412,8 @@ LOCAL_MODULE := libcompiler_rt
 LOCAL_CFLAGS := $(libcompiler_rt_common_CFLAGS)
 LOCAL_ASFLAGS := -integrated-as
 LOCAL_CLANG := true
-LOCAL_SRC_FILES := $(call get-libcompiler-rt-source-files,x86_64)
+LOCAL_SRC_FILES_x86 := $(call get-libcompiler-rt-source-files,x86)
+LOCAL_SRC_FILES_x86_64 := $(call get-libcompiler-rt-source-files,x86_64)
 # Only build enable_execute_stack.c on non-Windows hosts.
 LOCAL_SRC_FILES_darwin := lib/builtins/enable_execute_stack.c
 LOCAL_SRC_FILES_linux := lib/builtins/enable_execute_stack.c
