@@ -363,29 +363,24 @@ cc_library {
             ldflags: ["-Wl,--exclude-libs,libunwind_llvm.a"],
         },
         android_arm64: {
-            // b/26968262 liblzma needs to be after libunwindbacktrace
-            static_libs: ["libunwindbacktrace","liblzma"],
+            static_libs: ["libunwindbacktrace"],
             ldflags: ["-Wl,--exclude-libs,libunwindbacktrace.a"],
         },
         android_mips: {
-            // b/26968262 liblzma needs to be after libunwindbacktrace
-            static_libs: ["libunwindbacktrace","liblzma"],
+            static_libs: ["libunwindbacktrace"],
             ldflags: ["-Wl,--exclude-libs,libunwindbacktrace.a"],
         },
         android_mips64: {
-            // b/26968262 liblzma needs to be after libunwindbacktrace
-            static_libs: ["libunwindbacktrace","liblzma"],
+            static_libs: ["libunwindbacktrace"],
             ldflags: ["-Wl,--exclude-libs,libunwindbacktrace.a"],
         },
         android_x86: {
-            // b/26968262 liblzma needs to be after libunwindbacktrace
-            static_libs: ["libunwindbacktrace","liblzma"],
+            static_libs: ["libunwindbacktrace"],
             ldflags: ["-Wl,--exclude-libs,libunwindbacktrace.a"],
         },
         android_x86_64: {
             srcs: ["lib/builtins/ppc/floatditf.c"],
-            // b/26968262 liblzma needs to be after libunwindbacktrace
-            static_libs: ["libunwindbacktrace","liblzma"],
+            static_libs: ["libunwindbacktrace"],
             ldflags: ["-Wl,--exclude-libs,libunwindbacktrace.a"],
         },
         linux: {
