@@ -65,6 +65,7 @@ cc_library {
     // Skip apple_versioning.c since it is unused.
     // Skip atomic.c since it needs to be built separately according to the docs.
     srcs: [
+        "lib/builtins/enable_execute_stack.c",
         "lib/builtins/absvdi2.c",
         "lib/builtins/absvsi2.c",
         "lib/builtins/absvti2.c",
@@ -345,8 +346,6 @@ cc_library {
 
     target: {
         not_windows: {
-            // Only build enable_execute_stack.c on non-Windows hosts.
-            srcs: ["lib/builtins/enable_execute_stack.c"],
             host_ldlibs: [
                 "-lpthread",
                 "-lc",
@@ -354,7 +353,6 @@ cc_library {
             ],
         },
         android: {
-            srcs: ["lib/builtins/enable_execute_stack.c"],
             shared_libs: ["libdl", "liblog"],
             static_libs: ["liblzma"],
         },
@@ -388,6 +386,8 @@ cc_library {
         },
         windows: {
             static_libs: ["libunwindbacktrace"],
+            // Only build enable_execute_stack.c on non-Windows hosts.
+            exclude_srcs: ["lib/builtins/enable_execute_stack.c"],
         },
     },
 
