@@ -131,11 +131,15 @@ LOCAL_C_INCLUDES := \
     external/compiler-rt/lib \
     external/compiler-rt/include
 LOCAL_CFLAGS += $(asan_rtl_cflags)
+# work around clang -O2 bug that affects mips64 asan_flags only:
+# https://dmz-portal.mips.com/bugz/show_bug.cgi?id=2275
+# Fixed with http://reviews.llvm.org/rL266203
+LOCAL_CFLAGS_mips64 += -O1
 LOCAL_SRC_FILES := asan_preinit.cc
 LOCAL_CPP_EXTENSION := .cc
 LOCAL_CLANG := true
 LOCAL_SANITIZE := never
-LOCAL_MODULE_TARGET_ARCH := arm arm64 x86
+LOCAL_MODULE_TARGET_ARCH := arm arm64 x86 mips mips64
 LOCAL_NDK_STL_VARIANT := none
 LOCAL_SDK_VERSION := 19
 include $(BUILD_STATIC_LIBRARY)
@@ -157,6 +161,10 @@ LOCAL_C_INCLUDES := \
   external/compiler-rt/lib \
   external/compiler-rt/include
 LOCAL_CFLAGS += $(asan_rtl_cflags)
+# work around clang -O2 bug that affects mips64 asan_flags only:
+# https://dmz-portal.mips.com/bugz/show_bug.cgi?id=2275
+# Fixed with http://reviews.llvm.org/rL266203
+LOCAL_CFLAGS_mips64 += -O1
 LOCAL_SRC_FILES := $(asan_rtl_files) $(asan_rtl_cxx_files)
 LOCAL_CPP_EXTENSION := .cc
 LOCAL_LDLIBS := -llog -ldl
@@ -168,7 +176,7 @@ ifneq ($(HOST_OS),darwin)
 endif
 LOCAL_CLANG := true
 LOCAL_SANITIZE := never
-LOCAL_MODULE_TARGET_ARCH := arm arm64 x86
+LOCAL_MODULE_TARGET_ARCH := arm arm64 x86 mips mips64
 LOCAL_NDK_STL_VARIANT := none
 LOCAL_SDK_VERSION := 19
 include $(BUILD_SHARED_LIBRARY)
@@ -191,7 +199,7 @@ LOCAL_SRC_FILES := asanwrapper.cc
 LOCAL_CPP_EXTENSION := .cc
 LOCAL_CPPFLAGS := -std=c++11
 LOCAL_SANITIZE := never
-LOCAL_MODULE_TARGET_ARCH := arm arm64 x86
+LOCAL_MODULE_TARGET_ARCH := arm arm64 x86 mips mips64
 LOCAL_CXX_STL := libc++
 
 include $(BUILD_EXECUTABLE)
@@ -220,7 +228,7 @@ LOCAL_SRC_FILES := tests/asan_noinst_test.cc tests/asan_test_main.cc
 LOCAL_CPP_EXTENSION := .cc
 LOCAL_CLANG := true
 LOCAL_SANITIZE := never
-LOCAL_MODULE_TARGET_ARCH := arm arm64 x86
+LOCAL_MODULE_TARGET_ARCH := arm arm64 x86 mips mips64
 LOCAL_CXX_STL := libc++
 
 include $(BUILD_STATIC_TEST_LIBRARY)
@@ -241,7 +249,7 @@ LOCAL_STATIC_LIBRARIES := libasan_noinst_test
 LOCAL_SHARED_LIBRARIES := libc
 LOCAL_SANITIZE := address
 LOCAL_CLANG := true
-LOCAL_MODULE_TARGET_ARCH := arm arm64 x86
+LOCAL_MODULE_TARGET_ARCH := arm arm64 x86 mips mips64
 LOCAL_CXX_STL := libc++
 
 include $(BUILD_NATIVE_TEST)
