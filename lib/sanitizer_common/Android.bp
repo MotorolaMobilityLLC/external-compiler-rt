@@ -18,8 +18,9 @@
 //###############################################################################
 // Host modules
 
-cc_library_host_static {
+cc_library_static {
     name: "libsan",
+    host_supported: true,
 
     include_dirs: ["external/compiler-rt/lib"],
     cppflags: [
@@ -28,6 +29,7 @@ cc_library_host_static {
         "-std=c++11",
         "-Wall",
         "-Werror",
+        "-Wno-non-virtual-dtor",
         "-Wno-unused-parameter",
     ],
     srcs: [
