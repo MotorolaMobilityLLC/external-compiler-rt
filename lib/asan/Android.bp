@@ -40,49 +40,6 @@ asan_rtl_files = [
     "asan_suppressions.cc",
     "asan_thread.cc",
     "asan_win.cc",
-    "../interception/interception_linux.cc",
-    "../lsan/lsan_common.cc",
-    "../lsan/lsan_common_linux.cc",
-    "../sanitizer_common/sanitizer_allocator.cc",
-    "../sanitizer_common/sanitizer_common.cc",
-    "../sanitizer_common/sanitizer_common_libcdep.cc",
-    "../sanitizer_common/sanitizer_coverage_libcdep.cc",
-    "../sanitizer_common/sanitizer_coverage_mapping_libcdep.cc",
-    "../sanitizer_common/sanitizer_deadlock_detector1.cc",
-    "../sanitizer_common/sanitizer_deadlock_detector2.cc",
-    "../sanitizer_common/sanitizer_flags.cc",
-    "../sanitizer_common/sanitizer_flag_parser.cc",
-    "../sanitizer_common/sanitizer_libc.cc",
-    "../sanitizer_common/sanitizer_libignore.cc",
-    "../sanitizer_common/sanitizer_linux.cc",
-    "../sanitizer_common/sanitizer_linux_libcdep.cc",
-    "../sanitizer_common/sanitizer_mac.cc",
-    "../sanitizer_common/sanitizer_persistent_allocator.cc",
-    "../sanitizer_common/sanitizer_platform_limits_linux.cc",
-    "../sanitizer_common/sanitizer_platform_limits_posix.cc",
-    "../sanitizer_common/sanitizer_posix.cc",
-    "../sanitizer_common/sanitizer_posix_libcdep.cc",
-    "../sanitizer_common/sanitizer_printf.cc",
-    "../sanitizer_common/sanitizer_procmaps_common.cc",
-    "../sanitizer_common/sanitizer_procmaps_freebsd.cc",
-    "../sanitizer_common/sanitizer_procmaps_linux.cc",
-    "../sanitizer_common/sanitizer_procmaps_mac.cc",
-    "../sanitizer_common/sanitizer_stackdepot.cc",
-    "../sanitizer_common/sanitizer_stacktrace.cc",
-    "../sanitizer_common/sanitizer_stacktrace_libcdep.cc",
-    "../sanitizer_common/sanitizer_stacktrace_printer.cc",
-    "../sanitizer_common/sanitizer_stoptheworld_linux_libcdep.cc",
-    "../sanitizer_common/sanitizer_suppressions.cc",
-    "../sanitizer_common/sanitizer_symbolizer.cc",
-    "../sanitizer_common/sanitizer_symbolizer_libbacktrace.cc",
-    "../sanitizer_common/sanitizer_symbolizer_libcdep.cc",
-    "../sanitizer_common/sanitizer_symbolizer_posix_libcdep.cc",
-    "../sanitizer_common/sanitizer_symbolizer_process_libcdep.cc",
-    "../sanitizer_common/sanitizer_symbolizer_win.cc",
-    "../sanitizer_common/sanitizer_thread_registry.cc",
-    "../sanitizer_common/sanitizer_tls_get_addr.cc",
-    "../sanitizer_common/sanitizer_unwind_posix_libcdep.cc",
-    "../sanitizer_common/sanitizer_win.cc",
 ]
 
 asan_rtl_cxx_files = ["asan_new_delete.cc"]
@@ -105,7 +62,7 @@ asan_rtl_cflags = [
 
 cc_library_static {
     name: "libasan",
-    //host_supported: true,
+    host_supported: true,
     defaults: ["asan_arch_defaults"],
     include_dirs: [
         "external/compiler-rt/lib",
@@ -119,6 +76,11 @@ cc_library_static {
         host: {
             srcs: asan_rtl_files,
             whole_static_libs: ["libubsan"],
+            static_libs: [
+                "libinterception",
+                "liblsan",
+                "libsan",
+            ],
         },
     },
 
@@ -152,50 +114,6 @@ cc_library_host_static {
         },
     },
 }
-
-cc_defaults {
-    name: "libclang_rt_defaults",
-
-    // TODO:
-    // This library must go on /system partition, even in SANITIZE_TARGET mode (when all libraries are
-    // installed on /data). That's because /data may not be available until vold does some magic and
-    // vold itself depends on this library.
-
-    arch: {
-        arm: {
-            instruction_set: "arm",
-        },
-    },
-    target: {
-        darwin: {
-            enabled: false,
-        },
-    },
-    include_dirs: [
-        "external/compiler-rt/lib",
-        "external/compiler-rt/include",
-    ],
-    cflags: asan_rtl_cflags,
-    srcs: asan_rtl_files + asan_rtl_cxx_files,
-    static_libs: ["libubsan"],
-    clang: true,
-    sanitize: {
-        never: true,
-    },
-    sdk_version: "19",
-    stl: "none",
-}
-
-/*cc_library_shared {
-    name: "libclang_rt.asan-arm-android",
-    defaults: ["libclang_rt_defaults"],
-    enabled: false,
-    arch: {
-        arm: {
-            enabled: true,
-        },
-    },
-}*/
 
 cc_binary {
     name: "asanwrapper",
@@ -251,7 +169,7 @@ cc_library_static {
 
 cc_test {
     name: "asan_test",
-    //host_supported: true,
+    host_supported: true,
     defaults: ["asan_arch_defaults"],
 
     tags: ["tests"],
