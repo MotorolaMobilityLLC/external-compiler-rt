@@ -18,6 +18,8 @@
 cc_library_static {
     name: "libinterception",
     host_supported: true,
+    clang: true,
+    sdk_version: "19",
 
     include_dirs: ["external/compiler-rt/lib"],
     cppflags: [
