@@ -21,6 +21,8 @@
 cc_library_static {
     name: "libsan",
     host_supported: true,
+    clang: true,
+    sdk_version: "19",
 
     include_dirs: ["external/compiler-rt/lib"],
     cppflags: [
