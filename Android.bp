@@ -45,6 +45,15 @@ cc_library_static {
         mips64: {
             srcs: ["lib/builtins/clear_cache.c"],
         },
+        // Clang generates call to __unorddf2 builtin when compiling s_fmal.c
+        // in bionic.  Generate this builtin from compiler-rt for arm64 and
+        // x86_64 (where the corresponding libgcc does not have this builtin.
+        arm64: {
+            srcs: ["lib/builtins/comparedf2.c"],
+        },
+        x86_64: {
+            srcs: ["lib/builtins/comparedf2.c"],
+        },
     },
 
     target: {
