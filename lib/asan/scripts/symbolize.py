@@ -38,7 +38,7 @@ def android_get_load_address(path):
     return load_addresses[path]
   readelf_glob = os.path.join(os.environ['ANDROID_TOOLCHAIN'], '*-readelf')
   readelf = glob.glob(readelf_glob)[0]
-  readelf_pipe = subprocess.Popen([readelf, "-l", path], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+  readelf_pipe = subprocess.Popen([readelf, "-W", "-l", path], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
   for line in readelf_pipe.stdout:
       if ('LOAD' in line) and (' E ' in line):
           match = re.match(r'\s*LOAD\s+0x[01-9a-zA-Z]+\s+(0x[01-9a-zA-Z]+)', line, re.UNICODE)
