@@ -138,7 +138,6 @@ cc_library_static {
 
     tags: ["tests"],
     include_dirs: [
-        "external/gtest/include",
         "external/compiler-rt/include",
         "external/compiler-rt/lib",
         "external/compiler-rt/lib/asan/tests",
@@ -158,6 +157,8 @@ cc_library_static {
         "tests/asan_noinst_test.cc",
         "tests/asan_test_main.cc",
     ],
+
+    static_libs: ["libgtest"],
 
     clang: true,
     sanitize: {
