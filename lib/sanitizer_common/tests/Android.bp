@@ -82,7 +82,6 @@ cc_binary_host {
     name: "san_test-Nolibc",
     defaults: ["san_test_defaults"],
 
-    include_dirs: ["external/gtest/include"],
     srcs: ["sanitizer_nolibc_test_main.cc"],
     static_libs: [
         "libsan",
