@@ -38,6 +38,7 @@ ubsan_rtl_cppflags = [
     "-Werror",
     "-Wno-unused-parameter",
     "-Wno-non-virtual-dtor",
+    "-DUBSAN_CAN_USE_CXXABI",
 ]
 
 ubsan_rtl_c_includes = ["external/compiler-rt/lib"]
@@ -45,7 +46,6 @@ ubsan_rtl_c_includes = ["external/compiler-rt/lib"]
 cc_library_static {
     name: "libubsan",
     host_supported: true,
-    defaults: ["asan_arch_defaults"],
 
     include_dirs: ubsan_rtl_c_includes,
     cppflags: ubsan_rtl_cppflags,
@@ -63,6 +63,109 @@ cc_library_static {
     },
 }
 
+cc_library_static {
+    name: "libubsan_cxx",
+    host_supported: true,
+
+    include_dirs: ubsan_rtl_c_includes,
+    cppflags: ubsan_rtl_cppflags,
+    rtti: true,
+    srcs: ubsan_cxx_rtl_files,
+    sdk_version: "19",
+    sanitize: {
+        never: true,
+    },
+    compile_multilib: "both",
+}
+
+cc_defaults {
+    name: "libclang_rt_ubsan_defaults",
+
+    include_dirs: [
+        "external/compiler-rt/lib",
+        "external/compiler-rt/include",
+    ],
+    static_libs: [
+        "libsan",
+    ],
+    whole_static_libs: [
+        "libubsan",
+        "libubsan_cxx",
+    ],
+    shared_libs: [
+        "liblog",
+        "libdl",
+    ],
+    clang: true,
+    sanitize: {
+        never: true,
+    },
+    // _cxx bits (vptr-sanitizer and cfi) need dynamic_cast<>
+    stl: "c++_static",
+    sdk_version: "19",
+    enabled: false,
+}
+
+cc_library_shared {
+    name: "libclang_rt.ubsan_standalone-arm-android",
+    defaults: ["libclang_rt_ubsan_defaults"],
+    arch: {
+        arm: {
+            enabled: true,
+        },
+    },
+}
+
+cc_library_shared {
+    name: "libclang_rt.ubsan_standalone-aarch64-android",
+    defaults: ["libclang_rt_ubsan_defaults"],
+    arch: {
+        arm64: {
+            enabled: true,
+        },
+    },
+}
+
+cc_library_shared {
+    name: "libclang_rt.ubsan_standalone-i686-android",
+    defaults: ["libclang_rt_ubsan_defaults"],
+    arch: {
+        x86: {
+            enabled: true,
+        },
+    },
+}
+
+cc_library_shared {
+    name: "libclang_rt.ubsan_standalone-x86_64-android",
+    defaults: ["libclang_rt_ubsan_defaults"],
+    arch: {
+        x86_64: {
+            enabled: true,
+        },
+    },
+}
+
+cc_library_shared {
+    name: "libclang_rt.ubsan_standalone-mips-android",
+    defaults: ["libclang_rt_ubsan_defaults"],
+    arch: {
+        mips: {
+            enabled: true,
+        },
+    },
+}
+
+cc_library_shared {
+    name: "libclang_rt.ubsan_standalone-mips64-android",
+    defaults: ["libclang_rt_ubsan_defaults"],
+    arch: {
+        mips64: {
+            enabled: true,
+        },
+    },
+}
+
 //###############################################################################
 // Host modules
 
@@ -74,23 +177,6 @@ cc_library_host_static {
     srcs: ubsan_rtl_files,
     whole_static_libs: ["libsan"],
     stl: "none",
-    sanitize: {
-        never: true,
-    },
-    compile_multilib: "both",
-    target: {
-        darwin: {
-            enabled: false,
-        },
-    },
-}
-
-cc_library_host_static {
-    name: "libubsan_cxx",
-
-    include_dirs: ubsan_rtl_c_includes,
-    cppflags: ubsan_rtl_cppflags,
-    srcs: ubsan_cxx_rtl_files,
     sanitize: {
         never: true,
     },
