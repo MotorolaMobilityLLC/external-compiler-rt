@@ -154,55 +154,58 @@ cc_defaults {
     enabled: false,
 }
 
-cc_library_shared {
-    name: "libclang_rt.asan-arm-android",
-    defaults: ["libclang_rt_defaults"],
-    arch: {
-        arm: {
-            enabled: true,
-        },
-    },
-}
-
-cc_library_shared {
-    name: "libclang_rt.asan-aarch64-android",
-    defaults: ["libclang_rt_defaults"],
-    arch: {
-        arm64: {
-            enabled: true,
-        },
-    },
-}
-
-cc_library_shared {
-    name: "libclang_rt.asan-mips-android",
-    defaults: ["libclang_rt_defaults"],
-    arch: {
-        mips: {
-            enabled: true,
-        },
-    },
-}
-
-cc_library_shared {
-    name: "libclang_rt.asan-mips64-android",
-    defaults: ["libclang_rt_defaults"],
-    arch: {
-        mips64: {
-            enabled: true,
-        },
-    },
-}
-
-cc_library_shared {
-    name: "libclang_rt.asan-i686-android",
-    defaults: ["libclang_rt_defaults"],
-    arch: {
-        x86: {
-            enabled: true,
-        },
-    },
-}
+// Disable libclang_rt prebuilts in aosp/master until soong has a build option
+// to pick a prebuilt or compile/build a module.
+//
+// cc_library_shared {
+//     name: "libclang_rt.asan-arm-android",
+//     defaults: ["libclang_rt_defaults"],
+//     arch: {
+//         arm: {
+//             enabled: true,
+//         },
+//     },
+// }
+//
+// cc_library_shared {
+//     name: "libclang_rt.asan-aarch64-android",
+//     defaults: ["libclang_rt_defaults"],
+//     arch: {
+//         arm64: {
+//             enabled: true,
+//         },
+//     },
+// }
+//
+// cc_library_shared {
+//     name: "libclang_rt.asan-mips-android",
+//     defaults: ["libclang_rt_defaults"],
+//     arch: {
+//         mips: {
+//             enabled: true,
+//         },
+//     },
+// }
+//
+// cc_library_shared {
+//     name: "libclang_rt.asan-mips64-android",
+//     defaults: ["libclang_rt_defaults"],
+//     arch: {
+//         mips64: {
+//             enabled: true,
+//         },
+//     },
+// }
+//
+// cc_library_shared {
+//     name: "libclang_rt.asan-i686-android",
+//     defaults: ["libclang_rt_defaults"],
+//     arch: {
+//         x86: {
+//             enabled: true,
+//         },
+//     },
+// }
 
 cc_binary {
     name: "asanwrapper",
