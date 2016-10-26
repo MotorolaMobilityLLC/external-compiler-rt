@@ -15,7 +15,8 @@
 #include "sanitizer_platform.h"
 
 #if SANITIZER_LINUX && (defined(__x86_64__) || defined(__mips__) || \
-                        defined(__aarch64__) || defined(__powerpc64__))
+                        defined(__aarch64__) || defined(__powerpc64__) || \
+                        defined(__s390__))
 
 #include "sanitizer_stoptheworld.h"
 
@@ -232,8 +233,8 @@ static void TracerThreadDieCallback() {
 // Signal handler to wake up suspended threads when the tracer thread dies.
 static void TracerThreadSignalHandler(int signum, void *siginfo, void *uctx) {
   SignalContext ctx = SignalContext::Create(siginfo, uctx);
-  VPrintf(1, "Tracer caught signal %d: addr=0x%zx pc=0x%zx sp=0x%zx\n",
-      signum, ctx.addr, ctx.pc, ctx.sp);
+  Printf("Tracer caught signal %d: addr=0x%zx pc=0x%zx sp=0x%zx\n", signum,
+         ctx.addr, ctx.pc, ctx.sp);
   ThreadSuspender *inst = thread_suspender_instance;
   if (inst) {
     if (signum == SIGABRT)
@@ -481,6 +482,11 @@ typedef struct user_pt_regs regs_struct;
 #define REG_SP sp
 #define ARCH_IOVEC_FOR_GETREGSET
 
+#elif defined(__s390__)
+typedef _user_regs_struct regs_struct;
+#define REG_SP gprs[15]
+#define ARCH_IOVEC_FOR_GETREGSET
+
 #else
 #error "Unsupported architecture"
 #endif // SANITIZER_ANDROID && defined(__arm__)
@@ -520,3 +526,4 @@ uptr SuspendedThreadsList::RegisterCount() {
 
 #endif  // SANITIZER_LINUX && (defined(__x86_64__) || defined(__mips__)
         // || defined(__aarch64__) || defined(__powerpc64__)
+        // || defined(__s390__)
