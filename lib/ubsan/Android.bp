@@ -106,65 +106,68 @@ cc_defaults {
     enabled: false,
 }
 
-cc_library_shared {
-    name: "libclang_rt.ubsan_standalone-arm-android",
-    defaults: ["libclang_rt_ubsan_defaults"],
-    arch: {
-        arm: {
-            enabled: true,
-        },
-    },
-}
-
-cc_library_shared {
-    name: "libclang_rt.ubsan_standalone-aarch64-android",
-    defaults: ["libclang_rt_ubsan_defaults"],
-    arch: {
-        arm64: {
-            enabled: true,
-        },
-    },
-}
-
-cc_library_shared {
-    name: "libclang_rt.ubsan_standalone-i686-android",
-    defaults: ["libclang_rt_ubsan_defaults"],
-    arch: {
-        x86: {
-            enabled: true,
-        },
-    },
-}
-
-cc_library_shared {
-    name: "libclang_rt.ubsan_standalone-x86_64-android",
-    defaults: ["libclang_rt_ubsan_defaults"],
-    arch: {
-        x86_64: {
-            enabled: true,
-        },
-    },
-}
-
-cc_library_shared {
-    name: "libclang_rt.ubsan_standalone-mips-android",
-    defaults: ["libclang_rt_ubsan_defaults"],
-    arch: {
-        mips: {
-            enabled: true,
-        },
-    },
-}
-
-cc_library_shared {
-    name: "libclang_rt.ubsan_standalone-mips64-android",
-    defaults: ["libclang_rt_ubsan_defaults"],
-    arch: {
-        mips64: {
-            enabled: true,
-        },
-    },
-}
+// Disable libubsan_standalone prebuilts in aosp/master until soong has a build
+// option to pick a prebuilt or compile/build a module.
+//
+// cc_library_shared {
+//     name: "libclang_rt.ubsan_standalone-arm-android",
+//     defaults: ["libclang_rt_ubsan_defaults"],
+//     arch: {
+//         arm: {
+//             enabled: true,
+//         },
+//     },
+// }
+//
+// cc_library_shared {
+//     name: "libclang_rt.ubsan_standalone-aarch64-android",
+//     defaults: ["libclang_rt_ubsan_defaults"],
+//     arch: {
+//         arm64: {
+//             enabled: true,
+//         },
+//     },
+// }
+//
+// cc_library_shared {
+//     name: "libclang_rt.ubsan_standalone-i686-android",
+//     defaults: ["libclang_rt_ubsan_defaults"],
+//     arch: {
+//         x86: {
+//             enabled: true,
+//         },
+//     },
+// }
+//
+// cc_library_shared {
+//     name: "libclang_rt.ubsan_standalone-x86_64-android",
+//     defaults: ["libclang_rt_ubsan_defaults"],
+//     arch: {
+//         x86_64: {
+//             enabled: true,
+//         },
+//     },
+// }
+//
+// cc_library_shared {
+//     name: "libclang_rt.ubsan_standalone-mips-android",
+//     defaults: ["libclang_rt_ubsan_defaults"],
+//     arch: {
+//         mips: {
+//             enabled: true,
+//         },
+//     },
+// }
+//
+// cc_library_shared {
+//     name: "libclang_rt.ubsan_standalone-mips64-android",
+//     defaults: ["libclang_rt_ubsan_defaults"],
+//     arch: {
+//         mips64: {
+//             enabled: true,
+//         },
+//     },
+// }
 
 //###############################################################################
 // Host modules
