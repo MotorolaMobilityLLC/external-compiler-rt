@@ -22,6 +22,7 @@
 cc_library_static {
     name: "libcompiler_rt-extras",
     host_supported: true,
+    vendor_available: true,
     clang: true,
     sdk_version: "9",
     // The following list contains functions that are not available in libgcc.a, so
@@ -419,6 +420,7 @@ cc_library {
 cc_defaults {
     name: "asan_arch_defaults",
 
+    vendor_available: true,
     enabled: false,
     target: {
         android_arm: {
