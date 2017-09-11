@@ -39,7 +39,6 @@ cc_library_static {
         "lsan_common_linux.cc",
     ],
 
-    clang: true,
     sdk_version: "19",
     stl: "none",
 
