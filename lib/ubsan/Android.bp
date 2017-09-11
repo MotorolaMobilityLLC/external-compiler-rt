@@ -96,7 +96,6 @@ cc_defaults {
         "liblog",
         "libdl",
     ],
-    clang: true,
     sanitize: {
         never: true,
     },
