@@ -359,15 +359,8 @@ cc_library {
 
     sdk_version: "21",
     target: {
-        not_windows: {
-            host_ldlibs: [
-                "-lpthread",
-                "-lc",
-                "-lm",
-            ],
-        },
         android: {
-            shared_libs: ["libdl", "liblog"],
+            shared_libs: ["liblog"],
             static_libs: ["liblzma"],
         },
         android_arm: {
