@@ -64,10 +64,6 @@ cc_test_host {
         "sanitizer_thread_registry_test.cc",
     ],
     static_libs: ["libsan"],
-    host_ldlibs: [
-        "-ldl",
-        "-lrt",
-    ],
     sanitize: {
         never: true,
     },
@@ -90,10 +86,6 @@ cc_binary_host {
     ldflags: [
         "-nostdlib",
         "-Qunused-arguments",
-    ],
-    host_ldlibs: [
-        "-ldl",
-        "-lrt",
     ],
     sanitize: {
         never: true,
