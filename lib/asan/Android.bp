@@ -51,6 +51,8 @@ asan_rtl_cflags = [
     "-DASAN_NEEDS_SEGV=" + ASAN_NEEDS_SEGV,
     "-DASAN_HAS_EXCEPTIONS=" + ASAN_HAS_EXCEPTIONS,
     "-DASAN_FLEXIBLE_MAPPING_AND_OFFSET=" + ASAN_FLEXIBLE_MAPPING_AND_OFFSET,
+    "-Wall",
+    "-Werror",
     "-Wno-covered-switch-default",
     "-Wno-non-virtual-dtor",
     "-Wno-sign-compare",
@@ -210,6 +212,7 @@ cc_binary {
 
     srcs: ["asanwrapper.cc"],
 
+    cflags: ["-Wall", "-Werror"],
     cppflags: ["-std=c++11"],
     sanitize: {
         never: true,
@@ -233,6 +236,8 @@ cc_library_static {
         "external/compiler-rt/lib/sanitizer_common/tests",
     ],
     cflags: [
+        "-Wall",
+        "-Werror",
         "-Wno-non-virtual-dtor",
         "-Wno-unused-parameter",
         "-Wno-sign-compare",
@@ -273,6 +278,8 @@ cc_test {
         "-DASAN_NEEDS_SEGV=" + ASAN_NEEDS_SEGV,
         "-DASAN_HAS_EXCEPTIONS=" + ASAN_HAS_EXCEPTIONS,
         "-DASAN_HAS_BLACKLIST=1",
+        "-Wall",
+        "-Werror",
         "-Wno-covered-switch-default",
         "-Wno-non-virtual-dtor",
         "-Wno-sign-compare",
