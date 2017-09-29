@@ -294,11 +294,6 @@ cc_test {
     },
 
     stl: "libc++",
-    target: {
-        host: {
-            host_ldlibs: ["-lrt"],
-        },
-    },
 }
 
 // ANDROIDMK TRANSLATION ERROR: endif from unsupported contitional
