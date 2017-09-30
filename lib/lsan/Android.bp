@@ -33,6 +33,8 @@ cc_library_static {
         "-std=c++11",
         "-fno-rtti",
         "-fno-builtin",
+        "-Wall",
+        "-Werror",
     ],
     srcs: [
         "lsan_common.cc",
