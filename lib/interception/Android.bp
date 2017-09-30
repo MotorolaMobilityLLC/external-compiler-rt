@@ -21,12 +21,14 @@ cc_library_static {
     sdk_version: "19",
 
     include_dirs: ["external/compiler-rt/lib"],
+    cflags: [
+        "-Wall",
+        "-Werror",
+    ],
     cppflags: [
         "-fvisibility=hidden",
         "-fno-exceptions",
         "-std=c++11",
-        "-Wall",
-        "-Werror",
         "-Wno-unused-parameter",
     ],
     srcs: [
