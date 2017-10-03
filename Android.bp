@@ -393,7 +393,7 @@ cc_library {
             static_libs: ["libunwindbacktrace"],
             ldflags: ["-Wl,--exclude-libs,libunwindbacktrace.a"],
         },
-        linux: {
+        linux_glibc: {
             static_libs: ["libunwindbacktrace"],
             shared_libs: ["liblzma"],
         },
@@ -434,7 +434,7 @@ cc_defaults {
         android_x86: {
             enabled: true,
         },
-        linux: {
+        linux_glibc: {
             enabled: true,
         },
     },
