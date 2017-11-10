@@ -33,33 +33,28 @@ class ScopedAnnotation {
  public:
   ScopedAnnotation(ThreadState *thr, const char *aname, const char *f, int l,
                    uptr pc)
-      : thr_(thr)
-      , in_rtl_(thr->in_rtl) {
-    CHECK_EQ(thr_->in_rtl, 0);
+      : thr_(thr) {
     FuncEntry(thr_, pc);
-    thr_->in_rtl++;
     DPrintf("#%d: annotation %s() %s:%d\n", thr_->tid, aname, f, l);
   }
 
   ~ScopedAnnotation() {
-    thr_->in_rtl--;
-    CHECK_EQ(in_rtl_, thr_->in_rtl);
     FuncExit(thr_);
+    CheckNoLocks(thr_);
   }
  private:
   ThreadState *const thr_;
-  const int in_rtl_;
 };
 
 #define SCOPED_ANNOTATION(typ) \
     if (!flags()->enable_annotations) \
       return; \
     ThreadState *thr = cur_thread(); \
-    const uptr pc = (uptr)__builtin_return_address(0); \
+    const uptr caller_pc = (uptr)__builtin_return_address(0); \
     StatInc(thr, StatAnnotation); \
     StatInc(thr, Stat##typ); \
-    ScopedAnnotation sa(thr, __FUNCTION__, f, l, \
-        (uptr)__builtin_return_address(0)); \
+    ScopedAnnotation sa(thr, __func__, f, l, caller_pc); \
+    const uptr pc = StackTrace::GetCurrentPc(); \
     (void)pc; \
 /**/
 
@@ -68,8 +63,8 @@ static const int kMaxDescLen = 128;
 struct ExpectRace {
   ExpectRace *next;
   ExpectRace *prev;
-  int hitcount;
-  int addcount;
+  atomic_uintptr_t hitcount;
+  atomic_uintptr_t addcount;
   uptr addr;
   uptr size;
   char *file;
@@ -95,7 +90,8 @@ static void AddExpectRace(ExpectRace *list,
   ExpectRace *race = list->next;
   for (; race != list; race = race->next) {
     if (race->addr == addr && race->size == size) {
-      race->addcount++;
+      atomic_store_relaxed(&race->addcount,
+          atomic_load_relaxed(&race->addcount) + 1);
       return;
     }
   }
@@ -105,8 +101,8 @@ static void AddExpectRace(ExpectRace *list,
   race->file = f;
   race->line = l;
   race->desc[0] = 0;
-  race->hitcount = 0;
-  race->addcount = 1;
+  atomic_store_relaxed(&race->hitcount, 0);
+  atomic_store_relaxed(&race->addcount, 1);
   if (desc) {
     int i = 0;
     for (; i < kMaxDescLen - 1 && desc[i]; i++)
@@ -131,13 +127,11 @@ static ExpectRace *FindRace(ExpectRace *list, uptr addr, uptr size) {
 
 static bool CheckContains(ExpectRace *list, uptr addr, uptr size) {
   ExpectRace *race = FindRace(list, addr, size);
-  if (race == 0 && AlternativeAddress(addr))
-    race = FindRace(list, AlternativeAddress(addr), size);
   if (race == 0)
     return false;
   DPrintf("Hit expected/benign race: %s addr=%zx:%d %s:%d\n",
       race->desc, race->addr, (int)race->size, race->file, race->line);
-  race->hitcount++;
+  atomic_fetch_add(&race->hitcount, 1, memory_order_relaxed);
   return true;
 }
 
@@ -153,7 +147,7 @@ void InitializeDynamicAnnotations() {
 }
 
 bool IsExpectedReport(uptr addr, uptr size) {
-  Lock lock(&dyn_ann_ctx->mtx);
+  ReadLock lock(&dyn_ann_ctx->mtx);
   if (CheckContains(&dyn_ann_ctx->expect, addr, size))
     return true;
   if (CheckContains(&dyn_ann_ctx->benign, addr, size))
@@ -162,20 +156,21 @@ bool IsExpectedReport(uptr addr, uptr size) {
 }
 
 static void CollectMatchedBenignRaces(Vector<ExpectRace> *matched,
-    int *unique_count, int *hit_count, int ExpectRace::*counter) {
+    int *unique_count, int *hit_count, atomic_uintptr_t ExpectRace::*counter) {
   ExpectRace *list = &dyn_ann_ctx->benign;
   for (ExpectRace *race = list->next; race != list; race = race->next) {
     (*unique_count)++;
-    if (race->*counter == 0)
+    const uptr cnt = atomic_load_relaxed(&(race->*counter));
+    if (cnt == 0)
       continue;
-    (*hit_count) += race->*counter;
+    *hit_count += cnt;
     uptr i = 0;
     for (; i < matched->Size(); i++) {
       ExpectRace *race0 = &(*matched)[i];
       if (race->line == race0->line
           && internal_strcmp(race->file, race0->file) == 0
           && internal_strcmp(race->desc, race0->desc) == 0) {
-        race0->*counter += race->*counter;
+        atomic_fetch_add(&(race0->*counter), cnt, memory_order_relaxed);
         break;
       }
     }
@@ -200,8 +195,8 @@ void PrintMatchedBenignRaces() {
         hit_count, (int)internal_getpid());
     for (uptr i = 0; i < hit_matched.Size(); i++) {
       Printf("%d %s:%d %s\n",
-          hit_matched[i].hitcount, hit_matched[i].file,
-          hit_matched[i].line, hit_matched[i].desc);
+          atomic_load_relaxed(&hit_matched[i].hitcount),
+          hit_matched[i].file, hit_matched[i].line, hit_matched[i].desc);
     }
   }
   if (hit_matched.Size()) {
@@ -210,8 +205,8 @@ void PrintMatchedBenignRaces() {
         add_count, unique_count, (int)internal_getpid());
     for (uptr i = 0; i < add_matched.Size(); i++) {
       Printf("%d %s:%d %s\n",
-          add_matched[i].addcount, add_matched[i].file,
-          add_matched[i].line, add_matched[i].desc);
+          atomic_load_relaxed(&add_matched[i].addcount),
+          add_matched[i].file, add_matched[i].line, add_matched[i].desc);
     }
   }
 }
@@ -230,12 +225,12 @@ using namespace __tsan;  // NOLINT
 extern "C" {
 void INTERFACE_ATTRIBUTE AnnotateHappensBefore(char *f, int l, uptr addr) {
   SCOPED_ANNOTATION(AnnotateHappensBefore);
-  Release(cur_thread(), pc, addr);
+  Release(thr, pc, addr);
 }
 
 void INTERFACE_ATTRIBUTE AnnotateHappensAfter(char *f, int l, uptr addr) {
   SCOPED_ANNOTATION(AnnotateHappensAfter);
-  Acquire(cur_thread(), pc, addr);
+  Acquire(thr, pc, addr);
 }
 
 void INTERFACE_ATTRIBUTE AnnotateCondVarSignal(char *f, int l, uptr cv) {
@@ -310,8 +305,8 @@ void INTERFACE_ATTRIBUTE AnnotateFlushExpectedRaces(char *f, int l) {
   Lock lock(&dyn_ann_ctx->mtx);
   while (dyn_ann_ctx->expect.next != &dyn_ann_ctx->expect) {
     ExpectRace *race = dyn_ann_ctx->expect.next;
-    if (race->hitcount == 0) {
-      CTX()->nmissed_expected++;
+    if (atomic_load_relaxed(&race->hitcount) == 0) {
+      ctx->nmissed_expected++;
       ReportMissedExpectedRace(race);
     }
     race->prev->next = race->next;
@@ -383,22 +378,32 @@ void INTERFACE_ATTRIBUTE AnnotateBenignRace(
 
 void INTERFACE_ATTRIBUTE AnnotateIgnoreReadsBegin(char *f, int l) {
   SCOPED_ANNOTATION(AnnotateIgnoreReadsBegin);
-  IgnoreCtl(cur_thread(), false, true);
+  ThreadIgnoreBegin(thr, pc);
 }
 
 void INTERFACE_ATTRIBUTE AnnotateIgnoreReadsEnd(char *f, int l) {
   SCOPED_ANNOTATION(AnnotateIgnoreReadsEnd);
-  IgnoreCtl(cur_thread(), false, false);
+  ThreadIgnoreEnd(thr, pc);
 }
 
 void INTERFACE_ATTRIBUTE AnnotateIgnoreWritesBegin(char *f, int l) {
   SCOPED_ANNOTATION(AnnotateIgnoreWritesBegin);
-  IgnoreCtl(cur_thread(), true, true);
+  ThreadIgnoreBegin(thr, pc);
 }
 
 void INTERFACE_ATTRIBUTE AnnotateIgnoreWritesEnd(char *f, int l) {
   SCOPED_ANNOTATION(AnnotateIgnoreWritesEnd);
-  IgnoreCtl(thr, true, false);
+  ThreadIgnoreEnd(thr, pc);
+}
+
+void INTERFACE_ATTRIBUTE AnnotateIgnoreSyncBegin(char *f, int l) {
+  SCOPED_ANNOTATION(AnnotateIgnoreSyncBegin);
+  ThreadIgnoreSyncBegin(thr, pc);
+}
+
+void INTERFACE_ATTRIBUTE AnnotateIgnoreSyncEnd(char *f, int l) {
+  SCOPED_ANNOTATION(AnnotateIgnoreSyncEnd);
+  ThreadIgnoreSyncEnd(thr, pc);
 }
 
 void INTERFACE_ATTRIBUTE AnnotatePublishMemoryRange(
@@ -431,7 +436,7 @@ void INTERFACE_ATTRIBUTE WTFAnnotateHappensAfter(char *f, int l, uptr addr) {
 void INTERFACE_ATTRIBUTE WTFAnnotateBenignRaceSized(
     char *f, int l, uptr mem, uptr sz, char *desc) {
   SCOPED_ANNOTATION(AnnotateBenignRaceSized);
-  BenignRaceImpl(f, l, mem, 1, desc);
+  BenignRaceImpl(f, l, mem, sz, desc);
 }
 
 int INTERFACE_ATTRIBUTE RunningOnValgrind() {
@@ -448,4 +453,9 @@ const char INTERFACE_ATTRIBUTE* ThreadSanitizerQuery(const char *query) {
   else
     return "0";
 }
+
+void INTERFACE_ATTRIBUTE
+AnnotateMemoryIsInitialized(char *f, int l, uptr mem, uptr sz) {}
+void INTERFACE_ATTRIBUTE
+AnnotateMemoryIsUninitialized(char *f, int l, uptr mem, uptr sz) {}
 }  // extern "C"

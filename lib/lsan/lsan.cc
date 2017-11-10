@@ -15,34 +15,64 @@
 #include "lsan.h"
 
 #include "sanitizer_common/sanitizer_flags.h"
+#include "sanitizer_common/sanitizer_flag_parser.h"
 #include "sanitizer_common/sanitizer_stacktrace.h"
 #include "lsan_allocator.h"
 #include "lsan_common.h"
 #include "lsan_thread.h"
 
+bool lsan_inited;
+bool lsan_init_is_running;
+
 namespace __lsan {
 
-static void InitializeCommonFlags() {
-  CommonFlags *cf = common_flags();
-  cf->external_symbolizer_path = GetEnv("LSAN_SYMBOLIZER_PATH");
-  cf->symbolize = (cf->external_symbolizer_path &&
-      cf->external_symbolizer_path[0]);
-  cf->strip_path_prefix = "";
-  cf->fast_unwind_on_malloc = true;
-  cf->malloc_context_size = 30;
-  cf->detect_leaks = true;
-  cf->leak_check_at_exit = true;
-
-  ParseCommonFlagsFromString(GetEnv("LSAN_OPTIONS"));
+///// Interface to the common LSan module. /////
+bool WordIsPoisoned(uptr addr) {
+  return false;
 }
 
-void Init() {
-  static bool inited;
-  if (inited)
+}  // namespace __lsan
+
+using namespace __lsan;  // NOLINT
+
+static void InitializeFlags() {
+  // Set all the default values.
+  SetCommonFlagsDefaults();
+  {
+    CommonFlags cf;
+    cf.CopyFrom(*common_flags());
+    cf.external_symbolizer_path = GetEnv("LSAN_SYMBOLIZER_PATH");
+    cf.malloc_context_size = 30;
+    cf.detect_leaks = true;
+    cf.exitcode = 23;
+    OverrideCommonFlags(cf);
+  }
+
+  Flags *f = flags();
+  f->SetDefaults();
+
+  FlagParser parser;
+  RegisterLsanFlags(&parser, f);
+  RegisterCommonFlags(&parser);
+
+  parser.ParseString(GetEnv("LSAN_OPTIONS"));
+
+  SetVerbosity(common_flags()->verbosity);
+
+  if (Verbosity()) ReportUnrecognizedFlags();
+
+  if (common_flags()->help) parser.PrintFlagDescriptions();
+}
+
+extern "C" void __lsan_init() {
+  CHECK(!lsan_init_is_running);
+  if (lsan_inited)
     return;
-  inited = true;
+  lsan_init_is_running = true;
   SanitizerToolName = "LeakSanitizer";
-  InitializeCommonFlags();
+  CacheBinaryName();
+  InitializeFlags();
+  InitCommonLsan();
   InitializeAllocator();
   InitTlsSize();
   InitializeInterceptors();
@@ -52,16 +82,17 @@ void Init() {
   ThreadStart(tid, GetTid());
   SetCurrentThread(tid);
 
-  // Start symbolizer process if necessary.
-  const char* external_symbolizer = common_flags()->external_symbolizer_path;
-  if (common_flags()->symbolize && external_symbolizer &&
-      external_symbolizer[0]) {
-    InitializeExternalSymbolizer(external_symbolizer);
-  }
-
-  InitCommonLsan();
   if (common_flags()->detect_leaks && common_flags()->leak_check_at_exit)
     Atexit(DoLeakCheck);
+
+  InitializeCoverage(common_flags()->coverage, common_flags()->coverage_dir);
+
+  lsan_inited = true;
+  lsan_init_is_running = false;
 }
 
-}  // namespace __lsan
+extern "C" SANITIZER_INTERFACE_ATTRIBUTE
+void __sanitizer_print_stack_trace() {
+  GET_STACK_TRACE_FATAL;
+  stack.Print();
+}

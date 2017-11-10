@@ -14,14 +14,18 @@
 
 struct ioctl_desc {
   unsigned req;
-  // FIXME: support read+write arguments. Those are currently marked as WRITE.
+  // FIXME: support read+write arguments. Currently READWRITE and WRITE do the
+  // same thing.
+  // XXX: The declarations below may use WRITE instead of READWRITE, unless
+  // explicitly noted.
   enum {
     NONE,
     READ,
     WRITE,
+    READWRITE,
     CUSTOM
-  } type : 2;
-  unsigned size : 30;
+  } type : 3;
+  unsigned size : 29;
   const char* name;
 };
 
@@ -88,7 +92,7 @@ static void ioctl_table_fill() {
   _(TIOCSTI, READ, sizeof(char));
   _(TIOCSWINSZ, READ, struct_winsize_sz);
 
-#if (SANITIZER_LINUX && !SANITIZER_ANDROID) || SANITIZER_MAC
+#if (SANITIZER_LINUX && !SANITIZER_ANDROID)
   _(SIOCGETSGCNT, WRITE, struct_sioc_sg_req_sz);
   _(SIOCGETVIFCNT, WRITE, struct_sioc_vif_req_sz);
 #endif
@@ -489,11 +493,15 @@ static void ioctl_init() {
 // Handle the most evil ioctls that encode argument value as part of request id.
 static unsigned ioctl_request_fixup(unsigned req) {
 #if SANITIZER_LINUX
-  if ((req & ~0x3fff001fU) == IOCTL_EVIOCGBIT)
+  // Strip size and event number.
+  const unsigned kEviocgbitMask =
+      (IOC_SIZEMASK << IOC_SIZESHIFT) | EVIOC_EV_MAX;
+  if ((req & ~kEviocgbitMask) == IOCTL_EVIOCGBIT)
     return IOCTL_EVIOCGBIT;
-  if ((req & ~0x3fU) == IOCTL_EVIOCGABS)
+  // Strip absolute axis number.
+  if ((req & ~EVIOC_ABS_MAX) == IOCTL_EVIOCGABS)
     return IOCTL_EVIOCGABS;
-  if ((req & ~0x3fU) == IOCTL_EVIOCSABS)
+  if ((req & ~EVIOC_ABS_MAX) == IOCTL_EVIOCSABS)
     return IOCTL_EVIOCSABS;
 #endif
   return req;
@@ -512,7 +520,38 @@ static const ioctl_desc *ioctl_table_lookup(unsigned req) {
   if (left == right && ioctl_table[left].req == req)
     return ioctl_table + left;
   else
-    return 0;
+    return nullptr;
+}
+
+static bool ioctl_decode(unsigned req, ioctl_desc *desc) {
+  CHECK(desc);
+  desc->req = req;
+  desc->name = "<DECODED_IOCTL>";
+  desc->size = IOC_SIZE(req);
+  // Sanity check.
+  if (desc->size > 0xFFFF) return false;
+  unsigned dir = IOC_DIR(req);
+  switch (dir) {
+    case IOC_NONE:
+      desc->type = ioctl_desc::NONE;
+      break;
+    case IOC_READ | IOC_WRITE:
+      desc->type = ioctl_desc::READWRITE;
+      break;
+    case IOC_READ:
+      desc->type = ioctl_desc::WRITE;
+      break;
+    case IOC_WRITE:
+      desc->type = ioctl_desc::READ;
+      break;
+    default:
+      return false;
+  }
+  // Size can be 0 iff type is NONE.
+  if ((desc->type == IOC_NONE) != (desc->size == 0)) return false;
+  // Sanity check.
+  if (IOC_TYPE(req) == 0) return false;
+  return true;
 }
 
 static const ioctl_desc *ioctl_lookup(unsigned req) {
@@ -521,48 +560,41 @@ static const ioctl_desc *ioctl_lookup(unsigned req) {
   if (desc) return desc;
 
   // Try stripping access size from the request id.
-  desc = ioctl_table_lookup(req & ~0x3fff0000U);
+  desc = ioctl_table_lookup(req & ~(IOC_SIZEMASK << IOC_SIZESHIFT));
   // Sanity check: requests that encode access size are either read or write and
   // have size of 0 in the table.
   if (desc && desc->size == 0 &&
-      (desc->type == ioctl_desc::WRITE || desc->type == ioctl_desc::READ))
+      (desc->type == ioctl_desc::READWRITE || desc->type == ioctl_desc::WRITE ||
+       desc->type == ioctl_desc::READ))
     return desc;
-  return 0;
+  return nullptr;
 }
 
 static void ioctl_common_pre(void *ctx, const ioctl_desc *desc, int d,
                              unsigned request, void *arg) {
-  if (desc->type == ioctl_desc::READ) {
+  if (desc->type == ioctl_desc::READ || desc->type == ioctl_desc::READWRITE) {
     unsigned size = desc->size ? desc->size : IOC_SIZE(request);
     COMMON_INTERCEPTOR_READ_RANGE(ctx, arg, size);
   }
   if (desc->type != ioctl_desc::CUSTOM)
     return;
-  switch (request) {
-    case 0x00008912: {  // SIOCGIFCONF
-      struct __sanitizer_ifconf *ifc = (__sanitizer_ifconf *)arg;
-      COMMON_INTERCEPTOR_READ_RANGE(ctx, &ifc->ifc_len, sizeof(ifc->ifc_len));
-      break;
-    }
+  if (request == IOCTL_SIOCGIFCONF) {
+    struct __sanitizer_ifconf *ifc = (__sanitizer_ifconf *)arg;
+    COMMON_INTERCEPTOR_READ_RANGE(ctx, &ifc->ifc_len, sizeof(ifc->ifc_len));
   }
-  return;
 }
 
 static void ioctl_common_post(void *ctx, const ioctl_desc *desc, int res, int d,
                               unsigned request, void *arg) {
-  if (desc->type == ioctl_desc::WRITE) {
+  if (desc->type == ioctl_desc::WRITE || desc->type == ioctl_desc::READWRITE) {
     // FIXME: add verbose output
     unsigned size = desc->size ? desc->size : IOC_SIZE(request);
     COMMON_INTERCEPTOR_WRITE_RANGE(ctx, arg, size);
   }
   if (desc->type != ioctl_desc::CUSTOM)
     return;
-  switch (request) {
-    case 0x00008912: {  // SIOCGIFCONF
-      struct __sanitizer_ifconf *ifc = (__sanitizer_ifconf *)arg;
-      COMMON_INTERCEPTOR_WRITE_RANGE(ctx, ifc->ifc_ifcu.ifcu_req, ifc->ifc_len);
-      break;
-    }
+  if (request == IOCTL_SIOCGIFCONF) {
+    struct __sanitizer_ifconf *ifc = (__sanitizer_ifconf *)arg;
+    COMMON_INTERCEPTOR_WRITE_RANGE(ctx, ifc->ifc_ifcu.ifcu_req, ifc->ifc_len);
   }
-  return;
 }

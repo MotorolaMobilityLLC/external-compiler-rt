@@ -10,9 +10,14 @@
 // This file is a part of ThreadSanitizer/AddressSanitizer runtime.
 //
 //===----------------------------------------------------------------------===//
+#include "sanitizer_common/sanitizer_allocator_internal.h"
 #include "sanitizer_common/sanitizer_common.h"
+#include "sanitizer_common/sanitizer_flags.h"
 #include "sanitizer_common/sanitizer_libc.h"
 #include "sanitizer_common/sanitizer_platform.h"
+
+#include "sanitizer_pthread_wrappers.h"
+
 #include "gtest/gtest.h"
 
 namespace __sanitizer {
@@ -111,6 +116,9 @@ TEST(SanitizerCommon, InternalMmapVector) {
     vector.pop_back();
     EXPECT_EQ((uptr)i, vector.size());
   }
+  InternalMmapVector<uptr> empty_vector(0);
+  CHECK_GT(empty_vector.capacity(), 0U);
+  CHECK_EQ(0U, empty_vector.size());
 }
 
 void TestThreadInfo(bool main) {
@@ -154,8 +162,101 @@ TEST(SanitizerCommon, ThreadStackTlsMain) {
 TEST(SanitizerCommon, ThreadStackTlsWorker) {
   InitTlsSize();
   pthread_t t;
-  pthread_create(&t, 0, WorkerThread, 0);
-  pthread_join(t, 0);
+  PTHREAD_CREATE(&t, 0, WorkerThread, 0);
+  PTHREAD_JOIN(t, 0);
+}
+
+bool UptrLess(uptr a, uptr b) {
+  return a < b;
+}
+
+TEST(SanitizerCommon, InternalBinarySearch) {
+  static const uptr kSize = 5;
+  uptr arr[kSize];
+  for (uptr i = 0; i < kSize; i++) arr[i] = i * i;
+
+  for (uptr i = 0; i < kSize; i++)
+    ASSERT_EQ(InternalBinarySearch(arr, 0, kSize, i * i, UptrLess), i);
+
+  ASSERT_EQ(InternalBinarySearch(arr, 0, kSize, 7, UptrLess), kSize + 1);
+}
+
+#if SANITIZER_LINUX && !SANITIZER_ANDROID
+TEST(SanitizerCommon, FindPathToBinary) {
+  char *true_path = FindPathToBinary("true");
+  EXPECT_NE((char*)0, internal_strstr(true_path, "/bin/true"));
+  InternalFree(true_path);
+  EXPECT_EQ(0, FindPathToBinary("unexisting_binary.ergjeorj"));
+}
+#elif SANITIZER_WINDOWS
+TEST(SanitizerCommon, FindPathToBinary) {
+  // ntdll.dll should be on PATH in all supported test environments on all
+  // supported Windows versions.
+  char *ntdll_path = FindPathToBinary("ntdll.dll");
+  EXPECT_NE((char*)0, internal_strstr(ntdll_path, "ntdll.dll"));
+  InternalFree(ntdll_path);
+  EXPECT_EQ(0, FindPathToBinary("unexisting_binary.ergjeorj"));
+}
+#endif
+
+TEST(SanitizerCommon, StripPathPrefix) {
+  EXPECT_EQ(0, StripPathPrefix(0, "prefix"));
+  EXPECT_STREQ("foo", StripPathPrefix("foo", 0));
+  EXPECT_STREQ("dir/file.cc",
+               StripPathPrefix("/usr/lib/dir/file.cc", "/usr/lib/"));
+  EXPECT_STREQ("/file.cc", StripPathPrefix("/usr/myroot/file.cc", "/myroot"));
+  EXPECT_STREQ("file.h", StripPathPrefix("/usr/lib/./file.h", "/usr/lib/"));
+}
+
+TEST(SanitizerCommon, RemoveANSIEscapeSequencesFromString) {
+  RemoveANSIEscapeSequencesFromString(nullptr);
+  const char *buffs[22] = {
+    "Default",                                "Default",
+    "\033[95mLight magenta",                  "Light magenta",
+    "\033[30mBlack\033[32mGreen\033[90mGray", "BlackGreenGray",
+    "\033[106mLight cyan \033[107mWhite ",    "Light cyan White ",
+    "\033[31mHello\033[0m World",             "Hello World",
+    "\033[38;5;82mHello \033[38;5;198mWorld", "Hello World",
+    "123[653456789012",                       "123[653456789012",
+    "Normal \033[5mBlink \033[25mNormal",     "Normal Blink Normal",
+    "\033[106m\033[107m",                     "",
+    "",                                       "",
+    " ",                                      " ",
+  };
+
+  for (size_t i = 0; i < ARRAY_SIZE(buffs); i+=2) {
+    char *buffer_copy = internal_strdup(buffs[i]);
+    RemoveANSIEscapeSequencesFromString(buffer_copy);
+    EXPECT_STREQ(buffer_copy, buffs[i+1]);
+    InternalFree(buffer_copy);
+  }
+}
+
+TEST(SanitizerCommon, InternalScopedString) {
+  InternalScopedString str(10);
+  EXPECT_EQ(0U, str.length());
+  EXPECT_STREQ("", str.data());
+
+  str.append("foo");
+  EXPECT_EQ(3U, str.length());
+  EXPECT_STREQ("foo", str.data());
+
+  int x = 1234;
+  str.append("%d", x);
+  EXPECT_EQ(7U, str.length());
+  EXPECT_STREQ("foo1234", str.data());
+
+  str.append("%d", x);
+  EXPECT_EQ(9U, str.length());
+  EXPECT_STREQ("foo123412", str.data());
+
+  str.clear();
+  EXPECT_EQ(0U, str.length());
+  EXPECT_STREQ("", str.data());
+
+  str.append("0123456789");
+  EXPECT_EQ(9U, str.length());
+  EXPECT_STREQ("012345678", str.data());
 }
 
 }  // namespace __sanitizer

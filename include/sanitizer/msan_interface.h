@@ -19,18 +19,16 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#if __has_feature(memory_sanitizer)
-  /* Returns a string describing a stack origin.
-     Return NULL if the origin is invalid, or is not a stack origin. */
-  const char *__msan_get_origin_descr_if_stack(uint32_t id);
-
-
   /* Set raw origin for the memory range. */
-  void __msan_set_origin(const void *a, size_t size, uint32_t origin);
+  void __msan_set_origin(const volatile void *a, size_t size, uint32_t origin);
 
   /* Get raw origin for an address. */
-  uint32_t __msan_get_origin(const void *a);
+  uint32_t __msan_get_origin(const volatile void *a);
+
+  /* Test that this_id is a descendant of prev_id (or they are simply equal).
+   * "descendant" here means they are part of the same chain, created with
+   * __msan_chain_origin. */
+  int __msan_origin_is_descendant_or_same(uint32_t this_id, uint32_t prev_id);
 
   /* Returns non-zero if tracking origins. */
   int __msan_get_track_origins();
@@ -39,22 +37,29 @@ extern "C" {
   uint32_t __msan_get_umr_origin();
 
   /* Make memory region fully initialized (without changing its contents). */
-  void __msan_unpoison(const void *a, size_t size);
+  void __msan_unpoison(const volatile void *a, size_t size);
 
-  /* Make memory region fully uninitialized (without changing its contents). */
-  void __msan_poison(const void *a, size_t size);
+  /* Make a null-terminated string fully initialized (without changing its
+     contents). */
+  void __msan_unpoison_string(const volatile char *a);
+
+  /* Make memory region fully uninitialized (without changing its contents).
+     This is a legacy interface that does not update origin information. Use
+     __msan_allocated_memory() instead. */
+  void __msan_poison(const volatile void *a, size_t size);
 
   /* Make memory region partially uninitialized (without changing its contents).
    */
-  void __msan_partial_poison(const void* data, void* shadow, size_t size);
+  void __msan_partial_poison(const volatile void *data, void *shadow,
+                             size_t size);
 
   /* Returns the offset of the first (at least partially) poisoned byte in the
      memory range, or -1 if the whole range is good. */
-  intptr_t __msan_test_shadow(const void *x, size_t size);
+  intptr_t __msan_test_shadow(const volatile void *x, size_t size);
 
-  /* Set exit code when error(s) were detected.
-     Value of 0 means don't change the program exit code. */
-  void __msan_set_exit_code(int exit_code);
+  /* Checks that memory range is fully initialized, and reports an error if it
+   * is not. */
+  void __msan_check_mem_is_initialized(const volatile void *x, size_t size);
 
   /* For testing:
      __msan_set_expect_umr(1);
@@ -68,92 +73,37 @@ extern "C" {
      modules that were compiled without the corresponding compiler flag. */
   void __msan_set_keep_going(int keep_going);
 
-  /* Print shadow and origin for the memory range to stdout in a human-readable
+  /* Print shadow and origin for the memory range to stderr in a human-readable
      format. */
-  void __msan_print_shadow(const void *x, size_t size);
+  void __msan_print_shadow(const volatile void *x, size_t size);
 
-  /* Print current function arguments shadow and origin to stdout in a
+  /* Print shadow for the memory range to stderr in a minimalistic
      human-readable format. */
-  void __msan_print_param_shadow();
+  void __msan_dump_shadow(const volatile void *x, size_t size);
 
   /* Returns true if running under a dynamic tool (DynamoRio-based). */
   int  __msan_has_dynamic_component();
 
   /* Tell MSan about newly allocated memory (ex.: custom allocator).
      Memory will be marked uninitialized, with origin at the call site. */
-  void __msan_allocated_memory(const void* data, size_t size);
+  void __msan_allocated_memory(const volatile void* data, size_t size);
+
+  /* Tell MSan about newly destroyed memory. Mark memory as uninitialized. */
+  void __sanitizer_dtor_callback(const volatile void* data, size_t size);
 
   /* This function may be optionally provided by user and should return
      a string containing Msan runtime options. See msan_flags.h for details. */
   const char* __msan_default_options();
 
+  /* Deprecated. Call __sanitizer_set_death_callback instead. */
+  void __msan_set_death_callback(void (*callback)(void));
 
-  /***********************************/
-  /* Allocator statistics interface. */
-
-  /* Returns the estimated number of bytes that will be reserved by allocator
-     for request of "size" bytes. If Msan allocator can't allocate that much
-     memory, returns the maximal possible allocation size, otherwise returns
-     "size". */
-  size_t __msan_get_estimated_allocated_size(size_t size);
-
-  /* Returns true if p was returned by the Msan allocator and
-     is not yet freed. */
-  bool __msan_get_ownership(const void *p);
-
-  /* Returns the number of bytes reserved for the pointer p.
-     Requires (get_ownership(p) == true) or (p == 0). */
-  size_t __msan_get_allocated_size(const void *p);
-
-  /* Number of bytes, allocated and not yet freed by the application. */
-  size_t __msan_get_current_allocated_bytes();
-
-  /* Number of bytes, mmaped by msan allocator to fulfill allocation requests.
-     Generally, for request of X bytes, allocator can reserve and add to free
-     lists a large number of chunks of size X to use them for future requests.
-     All these chunks count toward the heap size. Currently, allocator never
-     releases memory to OS (instead, it just puts freed chunks to free
-     lists). */
-  size_t __msan_get_heap_size();
-
-  /* Number of bytes, mmaped by msan allocator, which can be used to fulfill
-     allocation requests. When a user program frees memory chunk, it can first
-     fall into quarantine and will count toward __msan_get_free_bytes()
-     later. */
-  size_t __msan_get_free_bytes();
-
-  /* Number of bytes in unmapped pages, that are released to OS. Currently,
-     always returns 0. */
-  size_t __msan_get_unmapped_bytes();
-
-  /* Malloc hooks that may be optionally provided by user.
-     __msan_malloc_hook(ptr, size) is called immediately after
-       allocation of "size" bytes, which returned "ptr".
-     __msan_free_hook(ptr) is called immediately before
-       deallocation of "ptr". */
-  void __msan_malloc_hook(void *ptr, size_t size);
-  void __msan_free_hook(void *ptr);
-
-#else  // __has_feature(memory_sanitizer)
-
-#define __msan_get_origin_descr_if_stack(id) ((const char*)0)
-#define __msan_set_origin(a, size, origin)
-#define __msan_get_origin(a) ((uint32_t)-1)
-#define __msan_get_track_origins() (0)
-#define __msan_get_umr_origin() ((uint32_t)-1)
-#define __msan_unpoison(a, size)
-#define __msan_poison(a, size)
-#define __msan_partial_poison(data, shadow, size)
-#define __msan_test_shadow(x, size) ((intptr_t)-1)
-#define __msan_set_exit_code(exit_code)
-#define __msan_set_expect_umr(expect_umr)
-#define __msan_print_shadow(x, size)
-#define __msan_print_param_shadow()
-#define __msan_has_dynamic_component() (0)
-#define __msan_allocated_memory(data, size)
-
-#endif   // __has_feature(memory_sanitizer)
-
+  /* Update shadow for the application copy of size bytes from src to dst.
+     Src and dst are application addresses. This function does not copy the
+     actual application memory, it only updates shadow and origin for such
+     copy. Source and destination regions can overlap. */
+  void __msan_copy_shadow(const volatile void *dst, const volatile void *src,
+                          size_t size);
 #ifdef __cplusplus
 }  // extern "C"
 #endif

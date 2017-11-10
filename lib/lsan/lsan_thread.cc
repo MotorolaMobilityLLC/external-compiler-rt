@@ -79,7 +79,7 @@ void ThreadContext::OnFinished() {
 
 u32 ThreadCreate(u32 parent_tid, uptr user_id, bool detached) {
   return thread_registry->CreateThread(user_id, detached, parent_tid,
-                                       /* arg */ 0);
+                                       /* arg */ nullptr);
 }
 
 void ThreadStart(u32 tid, uptr os_id) {
@@ -99,9 +99,9 @@ void ThreadFinish() {
 }
 
 ThreadContext *CurrentThreadContext() {
-  if (!thread_registry) return 0;
+  if (!thread_registry) return nullptr;
   if (GetCurrentThread() == kInvalidTid)
-    return 0;
+    return nullptr;
   // No lock needed when getting current thread.
   return (ThreadContext *)thread_registry->GetThreadLocked(GetCurrentThread());
 }
@@ -120,7 +120,7 @@ u32 ThreadTid(uptr uid) {
 
 void ThreadJoin(u32 tid) {
   CHECK_NE(tid, kInvalidTid);
-  thread_registry->JoinThread(tid, /* arg */0);
+  thread_registry->JoinThread(tid, /* arg */nullptr);
 }
 
 void EnsureMainThreadIDIsCorrect() {
@@ -145,6 +145,10 @@ bool GetThreadRangesLocked(uptr os_id, uptr *stack_begin, uptr *stack_end,
   return true;
 }
 
+void ForEachExtraStackRange(uptr os_id, RangeIteratorCallback callback,
+                            void *arg) {
+}
+
 void LockThreadRegistry() {
   thread_registry->Lock();
 }
@@ -153,4 +157,4 @@ void UnlockThreadRegistry() {
   thread_registry->Unlock();
 }
 
-}  // namespace __lsan
+} // namespace __lsan
