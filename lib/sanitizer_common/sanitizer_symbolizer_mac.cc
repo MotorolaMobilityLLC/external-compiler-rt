@@ -7,54 +7,182 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file is shared between AddressSanitizer and ThreadSanitizer
-// run-time libraries.
-// Mac-specific implementation of symbolizer parts.
+// This file is shared between various sanitizers' runtime libraries.
+//
+// Implementation of Mac-specific "atos" symbolizer.
 //===----------------------------------------------------------------------===//
 
 #include "sanitizer_platform.h"
 #if SANITIZER_MAC
-#include "sanitizer_common.h"
-#include "sanitizer_internal_defs.h"
-#include "sanitizer_placement_new.h"
-#include "sanitizer_procmaps.h"
-#include "sanitizer_symbolizer.h"
+
+#include "sanitizer_allocator_internal.h"
+#include "sanitizer_mac.h"
+#include "sanitizer_symbolizer_mac.h"
 
 namespace __sanitizer {
 
-uptr GetListOfModules(LoadedModule *modules, uptr max_modules,
-                      string_predicate_t filter) {
-  MemoryMappingLayout memory_mapping(false);
-  memory_mapping.Reset();
-  uptr cur_beg, cur_end, cur_offset;
-  InternalScopedBuffer<char> module_name(kMaxPathLength);
-  uptr n_modules = 0;
-  for (uptr i = 0;
-       n_modules < max_modules &&
-           memory_mapping.Next(&cur_beg, &cur_end, &cur_offset,
-                               module_name.data(), module_name.size(), 0);
-       i++) {
-    const char *cur_name = module_name.data();
-    if (cur_name[0] == '\0')
-      continue;
-    if (filter && !filter(cur_name))
-      continue;
-    LoadedModule *cur_module = 0;
-    if (n_modules > 0 &&
-        0 == internal_strcmp(cur_name, modules[n_modules - 1].full_name())) {
-      cur_module = &modules[n_modules - 1];
-    } else {
-      void *mem = &modules[n_modules];
-      cur_module = new(mem) LoadedModule(cur_name, cur_beg);
-      n_modules++;
-    }
-    cur_module->addAddressRange(cur_beg, cur_end);
-  }
-  return n_modules;
+#include <dlfcn.h>
+#include <errno.h>
+#include <stdlib.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <util.h>
+
+bool DlAddrSymbolizer::SymbolizePC(uptr addr, SymbolizedStack *stack) {
+  Dl_info info;
+  int result = dladdr((const void *)addr, &info);
+  if (!result) return false;
+  const char *demangled = DemangleCXXABI(info.dli_sname);
+  stack->info.function = demangled ? internal_strdup(demangled) : nullptr;
+  return true;
 }
 
-void SymbolizerPrepareForSandboxing() {
-  // Do nothing on Mac.
+bool DlAddrSymbolizer::SymbolizeData(uptr addr, DataInfo *datainfo) {
+  Dl_info info;
+  int result = dladdr((const void *)addr, &info);
+  if (!result) return false;
+  const char *demangled = DemangleCXXABI(info.dli_sname);
+  datainfo->name = internal_strdup(demangled);
+  datainfo->start = (uptr)info.dli_saddr;
+  return true;
+}
+
+class AtosSymbolizerProcess : public SymbolizerProcess {
+ public:
+  explicit AtosSymbolizerProcess(const char *path, pid_t parent_pid)
+      : SymbolizerProcess(path, /*use_forkpty*/ true) {
+    // Put the string command line argument in the object so that it outlives
+    // the call to GetArgV.
+    internal_snprintf(pid_str_, sizeof(pid_str_), "%d", parent_pid);
+  }
+
+ private:
+  bool ReachedEndOfOutput(const char *buffer, uptr length) const override {
+    return (length >= 1 && buffer[length - 1] == '\n');
+  }
+
+  void GetArgV(const char *path_to_binary,
+               const char *(&argv)[kArgVMax]) const override {
+    int i = 0;
+    argv[i++] = path_to_binary;
+    argv[i++] = "-p";
+    argv[i++] = &pid_str_[0];
+    if (GetMacosVersion() == MACOS_VERSION_MAVERICKS) {
+      // On Mavericks atos prints a deprecation warning which we suppress by
+      // passing -d. The warning isn't present on other OSX versions, even the
+      // newer ones.
+      argv[i++] = "-d";
+    }
+    argv[i++] = nullptr;
+  }
+
+  char pid_str_[16];
+};
+
+static const char *kAtosErrorMessages[] = {
+  "atos cannot examine process",
+  "unable to get permission to examine process",
+  "An admin user name and password is required",
+  "could not load inserted library",
+  "architecture mismatch between analysis process",
+};
+
+static bool IsAtosErrorMessage(const char *str) {
+  for (uptr i = 0; i < ARRAY_SIZE(kAtosErrorMessages); i++) {
+    if (internal_strstr(str, kAtosErrorMessages[i])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool ParseCommandOutput(const char *str, uptr addr, char **out_name,
+                               char **out_module, char **out_file, uptr *line,
+                               uptr *start_address) {
+  // Trim ending newlines.
+  char *trim;
+  ExtractTokenUpToDelimiter(str, "\n", &trim);
+
+  // The line from `atos` is in one of these formats:
+  //   myfunction (in library.dylib) (sourcefile.c:17)
+  //   myfunction (in library.dylib) + 0x1fe
+  //   myfunction (in library.dylib) + 15
+  //   0xdeadbeef (in library.dylib) + 0x1fe
+  //   0xdeadbeef (in library.dylib) + 15
+  //   0xdeadbeef (in library.dylib)
+  //   0xdeadbeef
+
+  if (IsAtosErrorMessage(trim)) {
+    Report("atos returned an error: %s\n", trim);
+    InternalFree(trim);
+    return false;
+  }
+
+  const char *rest = trim;
+  char *symbol_name;
+  rest = ExtractTokenUpToDelimiter(rest, " (in ", &symbol_name);
+  if (rest[0] == '\0') {
+    InternalFree(symbol_name);
+    InternalFree(trim);
+    return false;
+  }
+
+  if (internal_strncmp(symbol_name, "0x", 2) != 0)
+    *out_name = symbol_name;
+  else
+    InternalFree(symbol_name);
+  rest = ExtractTokenUpToDelimiter(rest, ") ", out_module);
+
+  if (rest[0] == '(') {
+    if (out_file) {
+      rest++;
+      rest = ExtractTokenUpToDelimiter(rest, ":", out_file);
+      char *extracted_line_number;
+      rest = ExtractTokenUpToDelimiter(rest, ")", &extracted_line_number);
+      if (line) *line = (uptr)internal_atoll(extracted_line_number);
+      InternalFree(extracted_line_number);
+    }
+  } else if (rest[0] == '+') {
+    rest += 2;
+    uptr offset = internal_atoll(rest);
+    if (start_address) *start_address = addr - offset;
+  }
+
+  InternalFree(trim);
+  return true;
+}
+
+AtosSymbolizer::AtosSymbolizer(const char *path, LowLevelAllocator *allocator)
+    : process_(new(*allocator) AtosSymbolizerProcess(path, getpid())) {}
+
+bool AtosSymbolizer::SymbolizePC(uptr addr, SymbolizedStack *stack) {
+  if (!process_) return false;
+  char command[32];
+  internal_snprintf(command, sizeof(command), "0x%zx\n", addr);
+  const char *buf = process_->SendCommand(command);
+  if (!buf) return false;
+  uptr line;
+  if (!ParseCommandOutput(buf, addr, &stack->info.function, &stack->info.module,
+                          &stack->info.file, &line, nullptr)) {
+    process_ = nullptr;
+    return false;
+  }
+  stack->info.line = (int)line;
+  return true;
+}
+
+bool AtosSymbolizer::SymbolizeData(uptr addr, DataInfo *info) {
+  if (!process_) return false;
+  char command[32];
+  internal_snprintf(command, sizeof(command), "0x%zx\n", addr);
+  const char *buf = process_->SendCommand(command);
+  if (!buf) return false;
+  if (!ParseCommandOutput(buf, addr, &info->name, &info->module, nullptr,
+                          nullptr, &info->start)) {
+    process_ = nullptr;
+    return false;
+  }
+  return true;
 }
 
 }  // namespace __sanitizer

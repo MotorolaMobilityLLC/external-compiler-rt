@@ -11,30 +11,100 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "ubsan_platform.h"
+#if CAN_SANITIZE_UB
 #include "ubsan_diag.h"
-#include "sanitizer_common/sanitizer_common.h"
-#include "sanitizer_common/sanitizer_libc.h"
+#include "ubsan_init.h"
+#include "ubsan_flags.h"
+#include "sanitizer_common/sanitizer_placement_new.h"
 #include "sanitizer_common/sanitizer_report_decorator.h"
 #include "sanitizer_common/sanitizer_stacktrace.h"
+#include "sanitizer_common/sanitizer_stacktrace_printer.h"
+#include "sanitizer_common/sanitizer_suppressions.h"
 #include "sanitizer_common/sanitizer_symbolizer.h"
 #include <stdio.h>
 
 using namespace __ubsan;
 
-Location __ubsan::getCallerLocation(uptr CallerLoc) {
-  if (!CallerLoc)
-    return Location();
+static void MaybePrintStackTrace(uptr pc, uptr bp) {
+  // We assume that flags are already parsed, as UBSan runtime
+  // will definitely be called when we print the first diagnostics message.
+  if (!flags()->print_stacktrace)
+    return;
+  // We can only use slow unwind, as we don't have any information about stack
+  // top/bottom.
+  // FIXME: It's better to respect "fast_unwind_on_fatal" runtime flag and
+  // fetch stack top/bottom information if we have it (e.g. if we're running
+  // under ASan).
+  if (StackTrace::WillUseFastUnwind(false))
+    return;
+  BufferedStackTrace stack;
+  stack.Unwind(kStackTraceMax, pc, bp, 0, 0, 0, false);
+  stack.Print();
+}
 
-  uptr Loc = StackTrace::GetPreviousInstructionPc(CallerLoc);
+static const char *ConvertTypeToString(ErrorType Type) {
+  switch (Type) {
+#define UBSAN_CHECK(Name, SummaryKind, FSanitizeFlagName)                      \
+  case ErrorType::Name:                                                        \
+    return SummaryKind;
+#include "ubsan_checks.inc"
+#undef UBSAN_CHECK
+  }
+  UNREACHABLE("unknown ErrorType!");
+}
 
-  AddressInfo Info;
-  if (!SymbolizeCode(Loc, &Info, 1) || !Info.module || !*Info.module)
-    return Location(Loc);
+static const char *ConvertTypeToFlagName(ErrorType Type) {
+  switch (Type) {
+#define UBSAN_CHECK(Name, SummaryKind, FSanitizeFlagName)                      \
+  case ErrorType::Name:                                                        \
+    return FSanitizeFlagName;
+#include "ubsan_checks.inc"
+#undef UBSAN_CHECK
+  }
+  UNREACHABLE("unknown ErrorType!");
+}
 
-  if (!Info.file)
-    return ModuleLocation(Info.module, Info.module_offset);
+static void MaybeReportErrorSummary(Location Loc, ErrorType Type) {
+  if (!common_flags()->print_summary)
+    return;
+  if (!flags()->report_error_type)
+    Type = ErrorType::GenericUB;
+  const char *ErrorKind = ConvertTypeToString(Type);
+  if (Loc.isSourceLocation()) {
+    SourceLocation SLoc = Loc.getSourceLocation();
+    if (!SLoc.isInvalid()) {
+      AddressInfo AI;
+      AI.file = internal_strdup(SLoc.getFilename());
+      AI.line = SLoc.getLine();
+      AI.column = SLoc.getColumn();
+      AI.function = internal_strdup("");  // Avoid printing ?? as function name.
+      ReportErrorSummary(ErrorKind, AI);
+      AI.Clear();
+      return;
+    }
+  } else if (Loc.isSymbolizedStack()) {
+    const AddressInfo &AI = Loc.getSymbolizedStack()->info;
+    ReportErrorSummary(ErrorKind, AI);
+    return;
+  }
+  ReportErrorSummary(ErrorKind);
+}
 
-  return SourceLocation(Info.file, Info.line, Info.column);
+namespace {
+class Decorator : public SanitizerCommonDecorator {
+ public:
+  Decorator() : SanitizerCommonDecorator() {}
+  const char *Highlight() const { return Green(); }
+  const char *EndHighlight() const { return Default(); }
+  const char *Note() const { return Black(); }
+  const char *EndNote() const { return Default(); }
+};
+}
+
+SymbolizedStack *__ubsan::getSymbolizedLocation(uptr PC) {
+  InitAsStandaloneIfNecessary();
+  return Symbolizer::GetOrInit()->SymbolizePC(PC);
 }
 
 Diag &Diag::operator<<(const TypeDescriptor &V) {
@@ -67,29 +137,40 @@ static void PrintHex(UIntMax Val) {
 }
 
 static void renderLocation(Location Loc) {
+  InternalScopedString LocBuffer(1024);
   switch (Loc.getKind()) {
   case Location::LK_Source: {
     SourceLocation SLoc = Loc.getSourceLocation();
     if (SLoc.isInvalid())
-      Printf("<unknown>:");
-    else {
-      Printf("%s:%d:", SLoc.getFilename(), SLoc.getLine());
-      if (SLoc.getColumn())
-        Printf("%d:", SLoc.getColumn());
+      LocBuffer.append("<unknown>");
+    else
+      RenderSourceLocation(&LocBuffer, SLoc.getFilename(), SLoc.getLine(),
+                           SLoc.getColumn(), common_flags()->symbolize_vs_style,
+                           common_flags()->strip_path_prefix);
+    break;
+  }
+  case Location::LK_Memory:
+    LocBuffer.append("%p", Loc.getMemoryLocation());
+    break;
+  case Location::LK_Symbolized: {
+    const AddressInfo &Info = Loc.getSymbolizedStack()->info;
+    if (Info.file) {
+      RenderSourceLocation(&LocBuffer, Info.file, Info.line, Info.column,
+                           common_flags()->symbolize_vs_style,
+                           common_flags()->strip_path_prefix);
+    } else if (Info.module) {
+      RenderModuleLocation(&LocBuffer, Info.module, Info.module_offset,
+                           common_flags()->strip_path_prefix);
+    } else {
+      LocBuffer.append("%p", Info.address);
     }
     break;
   }
-  case Location::LK_Module:
-    Printf("%s:0x%zx:", Loc.getModuleLocation().getModuleName(),
-           Loc.getModuleLocation().getOffset());
-    break;
-  case Location::LK_Memory:
-    Printf("%p:", Loc.getMemoryLocation());
-    break;
   case Location::LK_Null:
-    Printf("<unknown>:");
+    LocBuffer.append("<unknown>");
     break;
   }
+  Printf("%s:", LocBuffer.data());
 }
 
 static void renderText(const char *Message, const Diag::Arg *Args) {
@@ -108,8 +189,12 @@ static void renderText(const char *Message, const Diag::Arg *Args) {
       case Diag::AK_String:
         Printf("%s", A.String);
         break;
-      case Diag::AK_Mangled: {
-        Printf("'%s'", Demangle(A.String));
+      case Diag::AK_TypeName: {
+        if (SANITIZER_WINDOWS)
+          // The Windows implementation demangles names early.
+          Printf("'%s'", A.String);
+        else
+          Printf("'%s'", Symbolizer::GetOrInit()->Demangle(A.String));
         break;
       }
       case Diag::AK_SInt:
@@ -129,7 +214,11 @@ static void renderText(const char *Message, const Diag::Arg *Args) {
         // FIXME: Support floating-point formatting in sanitizer_common's
         //        printf, and stop using snprintf here.
         char Buffer[32];
+#if SANITIZER_WINDOWS
+        sprintf_s(Buffer, sizeof(Buffer), "%Lg", (long double)A.Float);
+#else
         snprintf(Buffer, sizeof(Buffer), "%Lg", (long double)A.Float);
+#endif
         Printf("%s", Buffer);
         break;
       }
@@ -154,36 +243,49 @@ static Range *upperBound(MemoryLocation Loc, Range *Ranges,
   return Best;
 }
 
+static inline uptr subtractNoOverflow(uptr LHS, uptr RHS) {
+  return (LHS < RHS) ? 0 : LHS - RHS;
+}
+
+static inline uptr addNoOverflow(uptr LHS, uptr RHS) {
+  const uptr Limit = (uptr)-1;
+  return (LHS > Limit - RHS) ? Limit : LHS + RHS;
+}
+
 /// Render a snippet of the address space near a location.
-static void renderMemorySnippet(const __sanitizer::AnsiColorDecorator &Decor,
-                                MemoryLocation Loc,
+static void renderMemorySnippet(const Decorator &Decor, MemoryLocation Loc,
                                 Range *Ranges, unsigned NumRanges,
                                 const Diag::Arg *Args) {
-  const unsigned BytesToShow = 32;
-  const unsigned MinBytesNearLoc = 4;
-
   // Show at least the 8 bytes surrounding Loc.
-  MemoryLocation Min = Loc - MinBytesNearLoc, Max = Loc + MinBytesNearLoc;
+  const unsigned MinBytesNearLoc = 4;
+  MemoryLocation Min = subtractNoOverflow(Loc, MinBytesNearLoc);
+  MemoryLocation Max = addNoOverflow(Loc, MinBytesNearLoc);
+  MemoryLocation OrigMin = Min;
   for (unsigned I = 0; I < NumRanges; ++I) {
     Min = __sanitizer::Min(Ranges[I].getStart().getMemoryLocation(), Min);
     Max = __sanitizer::Max(Ranges[I].getEnd().getMemoryLocation(), Max);
   }
 
   // If we have too many interesting bytes, prefer to show bytes after Loc.
+  const unsigned BytesToShow = 32;
   if (Max - Min > BytesToShow)
-    Min = __sanitizer::Min(Max - BytesToShow, Loc - MinBytesNearLoc);
-  Max = Min + BytesToShow;
+    Min = __sanitizer::Min(Max - BytesToShow, OrigMin);
+  Max = addNoOverflow(Min, BytesToShow);
+
+  if (!IsAccessibleMemoryRange(Min, Max - Min)) {
+    Printf("<memory cannot be printed>\n");
+    return;
+  }
 
   // Emit data.
   for (uptr P = Min; P != Max; ++P) {
-    // FIXME: Check that the address is readable before printing it.
     unsigned char C = *reinterpret_cast<const unsigned char*>(P);
     Printf("%s%02x", (P % 8 == 0) ? "  " : " ", C);
   }
   Printf("\n");
 
   // Emit highlights.
-  Printf(Decor.Green());
+  Printf(Decor.Highlight());
   Range *InRange = upperBound(Min, Ranges, NumRanges);
   for (uptr P = Min; P != Max; ++P) {
     char Pad = ' ', Byte = ' ';
@@ -198,7 +300,7 @@ static void renderMemorySnippet(const __sanitizer::AnsiColorDecorator &Decor,
     char Buffer[] = { Pad, Pad, P == Loc ? '^' : Byte, Byte, 0 };
     Printf((P % 8 == 0) ? Buffer : &Buffer[1]);
   }
-  Printf("%s\n", Decor.Default());
+  Printf("%s\n", Decor.EndHighlight());
 
   // Go over the line again, and print names for the ranges.
   InRange = 0;
@@ -236,8 +338,9 @@ static void renderMemorySnippet(const __sanitizer::AnsiColorDecorator &Decor,
 }
 
 Diag::~Diag() {
-  __sanitizer::AnsiColorDecorator Decor(PrintsToTty());
-  SpinMutexLock l(&CommonSanitizerReportMutex);
+  // All diagnostics should be printed under report mutex.
+  CommonSanitizerReportMutex.CheckLocked();
+  Decorator Decor;
   Printf(Decor.Bold());
 
   renderLocation(Loc);
@@ -245,11 +348,11 @@ Diag::~Diag() {
   switch (Level) {
   case DL_Error:
     Printf("%s runtime error: %s%s",
-           Decor.Red(), Decor.Default(), Decor.Bold());
+           Decor.Warning(), Decor.EndWarning(), Decor.Bold());
     break;
 
   case DL_Note:
-    Printf("%s note: %s", Decor.Black(), Decor.Default());
+    Printf("%s note: %s", Decor.Note(), Decor.EndNote());
     break;
   }
 
@@ -261,3 +364,68 @@ Diag::~Diag() {
     renderMemorySnippet(Decor, Loc.getMemoryLocation(), Ranges,
                         NumRanges, Args);
 }
+
+ScopedReport::ScopedReport(ReportOptions Opts, Location SummaryLoc,
+                           ErrorType Type)
+    : Opts(Opts), SummaryLoc(SummaryLoc), Type(Type) {
+  InitAsStandaloneIfNecessary();
+  CommonSanitizerReportMutex.Lock();
+}
+
+ScopedReport::~ScopedReport() {
+  MaybePrintStackTrace(Opts.pc, Opts.bp);
+  MaybeReportErrorSummary(SummaryLoc, Type);
+  CommonSanitizerReportMutex.Unlock();
+  if (flags()->halt_on_error)
+    Die();
+}
+
+ALIGNED(64) static char suppression_placeholder[sizeof(SuppressionContext)];
+static SuppressionContext *suppression_ctx = nullptr;
+static const char kVptrCheck[] = "vptr_check";
+static const char *kSuppressionTypes[] = {
+#define UBSAN_CHECK(Name, SummaryKind, FSanitizeFlagName) FSanitizeFlagName,
+#include "ubsan_checks.inc"
+#undef UBSAN_CHECK
+    kVptrCheck,
+};
+
+void __ubsan::InitializeSuppressions() {
+  CHECK_EQ(nullptr, suppression_ctx);
+  suppression_ctx = new (suppression_placeholder) // NOLINT
+      SuppressionContext(kSuppressionTypes, ARRAY_SIZE(kSuppressionTypes));
+  suppression_ctx->ParseFromFile(flags()->suppressions);
+}
+
+bool __ubsan::IsVptrCheckSuppressed(const char *TypeName) {
+  InitAsStandaloneIfNecessary();
+  CHECK(suppression_ctx);
+  Suppression *s;
+  return suppression_ctx->Match(TypeName, kVptrCheck, &s);
+}
+
+bool __ubsan::IsPCSuppressed(ErrorType ET, uptr PC, const char *Filename) {
+  InitAsStandaloneIfNecessary();
+  CHECK(suppression_ctx);
+  const char *SuppType = ConvertTypeToFlagName(ET);
+  // Fast path: don't symbolize PC if there is no suppressions for given UB
+  // type.
+  if (!suppression_ctx->HasSuppressionType(SuppType))
+    return false;
+  Suppression *s = nullptr;
+  // Suppress by file name known to runtime.
+  if (Filename != nullptr && suppression_ctx->Match(Filename, SuppType, &s))
+    return true;
+  // Suppress by module name.
+  if (const char *Module = Symbolizer::GetOrInit()->GetModuleNameForPc(PC)) {
+    if (suppression_ctx->Match(Module, SuppType, &s))
+      return true;
+  }
+  // Suppress by function or source file name from debug info.
+  SymbolizedStackHolder Stack(Symbolizer::GetOrInit()->SymbolizePC(PC));
+  const AddressInfo &AI = Stack.get()->info;
+  return suppression_ctx->Match(AI.function, SuppType, &s) ||
+         suppression_ctx->Match(AI.file, SuppType, &s);
+}
+
+#endif  // CAN_SANITIZE_UB

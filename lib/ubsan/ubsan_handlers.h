@@ -24,10 +24,14 @@ struct TypeMismatchData {
   unsigned char TypeCheckKind;
 };
 
+#define UNRECOVERABLE(checkname, ...) \
+  extern "C" SANITIZER_INTERFACE_ATTRIBUTE NORETURN \
+    void __ubsan_handle_ ## checkname( __VA_ARGS__ );
+
 #define RECOVERABLE(checkname, ...) \
   extern "C" SANITIZER_INTERFACE_ATTRIBUTE \
     void __ubsan_handle_ ## checkname( __VA_ARGS__ ); \
-  extern "C" SANITIZER_INTERFACE_ATTRIBUTE \
+  extern "C" SANITIZER_INTERFACE_ATTRIBUTE NORETURN \
     void __ubsan_handle_ ## checkname ## _abort( __VA_ARGS__ );
 
 /// \brief Handle a runtime type check failure, caused by either a misaligned
@@ -81,11 +85,9 @@ struct UnreachableData {
 };
 
 /// \brief Handle a __builtin_unreachable which is reached.
-extern "C" SANITIZER_INTERFACE_ATTRIBUTE
-void __ubsan_handle_builtin_unreachable(UnreachableData *Data);
+UNRECOVERABLE(builtin_unreachable, UnreachableData *Data)
 /// \brief Handle reaching the end of a value-returning function.
-extern "C" SANITIZER_INTERFACE_ATTRIBUTE
-void __ubsan_handle_missing_return(UnreachableData *Data);
+UNRECOVERABLE(missing_return, UnreachableData *Data)
 
 struct VLABoundData {
   SourceLocation Loc;
@@ -95,22 +97,64 @@ struct VLABoundData {
 /// \brief Handle a VLA with a non-positive bound.
 RECOVERABLE(vla_bound_not_positive, VLABoundData *Data, ValueHandle Bound)
 
+// Keeping this around for binary compatibility with (sanitized) programs
+// compiled with older compilers.
 struct FloatCastOverflowData {
-  // FIXME: SourceLocation Loc;
   const TypeDescriptor &FromType;
   const TypeDescriptor &ToType;
 };
 
-/// \brief Handle overflow in a conversion to or from a floating-point type.
-RECOVERABLE(float_cast_overflow, FloatCastOverflowData *Data, ValueHandle From)
+struct FloatCastOverflowDataV2 {
+  SourceLocation Loc;
+  const TypeDescriptor &FromType;
+  const TypeDescriptor &ToType;
+};
+
+/// Handle overflow in a conversion to or from a floating-point type.
+/// void *Data is one of FloatCastOverflowData* or FloatCastOverflowDataV2*
+RECOVERABLE(float_cast_overflow, void *Data, ValueHandle From)
 
 struct InvalidValueData {
-  // FIXME: SourceLocation Loc;
+  SourceLocation Loc;
   const TypeDescriptor &Type;
 };
 
 /// \brief Handle a load of an invalid value for the type.
 RECOVERABLE(load_invalid_value, InvalidValueData *Data, ValueHandle Val)
+
+struct FunctionTypeMismatchData {
+  SourceLocation Loc;
+  const TypeDescriptor &Type;
+};
+
+RECOVERABLE(function_type_mismatch,
+            FunctionTypeMismatchData *Data,
+            ValueHandle Val)
+
+struct NonNullReturnData {
+  SourceLocation Loc;
+  SourceLocation AttrLoc;
+};
+
+/// \brief Handle returning null from function with returns_nonnull attribute.
+RECOVERABLE(nonnull_return, NonNullReturnData *Data)
+
+struct NonNullArgData {
+  SourceLocation Loc;
+  SourceLocation AttrLoc;
+  int ArgIndex;
+};
+
+/// \brief Handle passing null pointer to function with nonnull attribute.
+RECOVERABLE(nonnull_arg, NonNullArgData *Data)
+
+struct CFIBadIcallData {
+  SourceLocation Loc;
+  const TypeDescriptor &Type;
+};
+
+/// \brief Handle control flow integrity failure for indirect function calls.
+RECOVERABLE(cfi_bad_icall, CFIBadIcallData *Data, ValueHandle Function)
 
 }
 
