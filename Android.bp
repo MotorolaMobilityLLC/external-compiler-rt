@@ -36,6 +36,8 @@ cc_library_static {
 
     cflags: [
         "-Wno-unused-parameter",
+        "-Wno-visibility",
+        "-Wno-incompatible-pointer-types",
         "-Werror",
     ],
 
@@ -234,6 +236,8 @@ cc_library {
 
     cflags: [
         "-Wno-unused-parameter",
+        "-Wno-visibility",
+        "-Wno-incompatible-pointer-types",
         "-Werror",
     ],
 
