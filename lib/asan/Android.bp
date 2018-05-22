@@ -65,6 +65,7 @@ asan_rtl_cflags = [
 cc_library_static {
     name: "libasan",
     host_supported: true,
+    recovery_available: true,
     defaults: ["asan_arch_defaults"],
     include_dirs: [
         "external/compiler-rt/lib",
