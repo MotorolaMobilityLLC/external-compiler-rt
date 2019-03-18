@@ -404,7 +404,7 @@ cc_library {
             shared_libs: ["liblzma"],
         },
         windows: {
-            static_libs: ["libunwindbacktrace", "libunwind_static"],
+            enabled: true,
             // Only build enable_execute_stack.c on non-Windows hosts.
             exclude_srcs: ["lib/builtins/enable_execute_stack.c"],
         },
