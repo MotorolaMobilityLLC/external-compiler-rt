@@ -82,6 +82,7 @@ cc_library {
         support_system_process: true,
     },
     host_supported: true,
+    native_bridge_supported: true,
     // The following list contains platform-independent functionalities.
     //
     // Skip apple_versioning.c since it is unused.
