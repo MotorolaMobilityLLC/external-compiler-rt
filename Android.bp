@@ -412,7 +412,7 @@ cc_library {
     },
 
     asflags: ["-integrated-as"],
-    no_libgcc: true,
+    no_libcrt: true,
 
     sanitize: {
         never: true,
