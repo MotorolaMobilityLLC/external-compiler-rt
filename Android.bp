@@ -373,7 +373,6 @@ cc_library {
     target: {
         android: {
             shared_libs: ["liblog"],
-            static_libs: ["liblzma"],
         },
         android_arm: {
             static_libs: ["libunwind_llvm"],
@@ -402,7 +401,6 @@ cc_library {
         },
         linux_glibc: {
             static_libs: ["libunwindbacktrace", "libunwind_static"],
-            shared_libs: ["liblzma"],
         },
         windows: {
             enabled: true,
