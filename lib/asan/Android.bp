@@ -66,6 +66,7 @@ cc_library_static {
     name: "libasan",
     host_supported: true,
     recovery_available: true,
+    native_bridge_supported: true,
     defaults: ["asan_arch_defaults"],
     include_dirs: [
         "external/compiler-rt/lib",
