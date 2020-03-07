@@ -43,12 +43,6 @@ cc_library_static {
     ],
 
     arch: {
-        mips: {
-            srcs: ["lib/builtins/clear_cache.c"],
-        },
-        mips64: {
-            srcs: ["lib/builtins/clear_cache.c"],
-        },
         // Clang generates call to __unorddf2 builtin when compiling s_fmal.c
         // in bionic.  Generate this builtin from compiler-rt for arm64 and
         // x86_64 (where the corresponding libgcc does not have this builtin.
@@ -310,11 +304,6 @@ cc_library {
                 "lib/builtins/umodsi3.c",
             ],
         },
-        mips64: {
-            cflags: [
-                "-DCRT_HAS_128BIT",
-            ],
-        },
         x86: {
             srcs: [
                 "lib/builtins/i386/ashldi3.S",
@@ -379,14 +368,6 @@ cc_library {
             ldflags: ["-Wl,--exclude-libs,libunwind_llvm.a"],
         },
         android_arm64: {
-            static_libs: ["libunwindbacktrace", "libunwind_static"],
-            ldflags: ["-Wl,--exclude-libs,libunwindbacktrace.a:libunwind.a"],
-        },
-        android_mips: {
-            static_libs: ["libunwindbacktrace", "libunwind_static"],
-            ldflags: ["-Wl,--exclude-libs,libunwindbacktrace.a:libunwind.a"],
-        },
-        android_mips64: {
             static_libs: ["libunwindbacktrace", "libunwind_static"],
             ldflags: ["-Wl,--exclude-libs,libunwindbacktrace.a:libunwind.a"],
         },
