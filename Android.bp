@@ -370,20 +370,17 @@ cc_library {
             ldflags: ["-Wl,--exclude-libs,libunwind_llvm.a"],
         },
         android_arm64: {
-            static_libs: ["libunwindbacktrace", "libunwind_static"],
-            ldflags: ["-Wl,--exclude-libs,libunwindbacktrace.a:libunwind.a"],
+            static_libs: ["libgcc_stripped"],
+            ldflags: ["-Wl,--exclude-libs,libgcc_stripped.a"],
         },
         android_x86: {
-            static_libs: ["libunwindbacktrace", "libunwind_static"],
-            ldflags: ["-Wl,--exclude-libs,libunwindbacktrace.a:libunwind.a"],
+            static_libs: ["libgcc_stripped"],
+            ldflags: ["-Wl,--exclude-libs,libgcc_stripped.a"],
         },
         android_x86_64: {
             srcs: ["lib/builtins/ppc/floatditf.c"],
-            static_libs: ["libunwindbacktrace", "libunwind_static"],
-            ldflags: ["-Wl,--exclude-libs,libunwindbacktrace.a:libunwind.a"],
-        },
-        linux_glibc: {
-            static_libs: ["libunwindbacktrace", "libunwind_static"],
+            static_libs: ["libgcc_stripped"],
+            ldflags: ["-Wl,--exclude-libs,libgcc_stripped.a"],
         },
         windows: {
             enabled: true,
