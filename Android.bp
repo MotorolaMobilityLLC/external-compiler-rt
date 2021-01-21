@@ -364,23 +364,11 @@ cc_library {
     target: {
         android: {
             shared_libs: ["liblog"],
-        },
-        android_arm: {
-            static_libs: ["libunwind_llvm"],
-            ldflags: ["-Wl,--exclude-libs,libunwind_llvm.a"],
-        },
-        android_arm64: {
-            static_libs: ["libgcc_stripped"],
-            ldflags: ["-Wl,--exclude-libs,libgcc_stripped.a"],
-        },
-        android_x86: {
-            static_libs: ["libgcc_stripped"],
-            ldflags: ["-Wl,--exclude-libs,libgcc_stripped.a"],
+            static_libs: ["libunwind"],
+            ldflags: ["-Wl,--exclude-libs,libunwind.a"],
         },
         android_x86_64: {
             srcs: ["lib/builtins/ppc/floatditf.c"],
-            static_libs: ["libgcc_stripped"],
-            ldflags: ["-Wl,--exclude-libs,libgcc_stripped.a"],
         },
         windows: {
             enabled: true,
